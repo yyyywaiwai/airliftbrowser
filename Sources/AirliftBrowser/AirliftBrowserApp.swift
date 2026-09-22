@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct AirliftBrowserApp: App {
@@ -19,9 +20,16 @@ private struct BrowserView: View {
     @State private var deletingEntry: Entry?
     @State private var showDelete = false
     @State private var showPoC = false
+    @State private var restoringCard: PayCard?
 
     private var visibleEntries: [Entry] {
         browser.entries.filter { search.isEmpty || $0.name.localizedStandardContains(search) }
+    }
+
+    private var visibleCards: [PayCard] {
+        browser.cards.filter {
+            search.isEmpty || $0.title.localizedStandardContains(search) || $0.subtitle.localizedStandardContains(search)
+        }
     }
 
     var body: some View {
@@ -51,6 +59,9 @@ private struct BrowserView: View {
                     locationButton("Media", icon: "externaldrive", selected: browser.scope == .media) {
                         browser.showMedia()
                     }
+                    locationButton("Apple Pay", icon: "creditcard", selected: browser.scope == .cards) {
+                        browser.showCards()
+                    }
                 }.padding(.horizontal, 12).padding(.bottom, 8)
                 VStack(alignment: .leading, spacing: 8) {
                     Label(browser.scope == .system ? "実機ファイルブラウザ" : "Media領域",
@@ -78,9 +89,14 @@ private struct BrowserView: View {
                     Button("進む", systemImage: "chevron.right") { browser.goForward() }
                         .labelStyle(.iconOnly).disabled(!browser.canGoForward)
                     Button("上のフォルダ", systemImage: "arrow.up") { browser.goUp() }
-                        .labelStyle(.iconOnly).disabled(!browser.canGoUp)
-                    Text(browser.scope == .system ? "Device" : "Media").font(.callout.weight(.semibold))
-                    if browser.scope == .system {
+                        .labelStyle(.iconOnly).disabled(!browser.canGoUp || browser.scope == .cards)
+                    Text(browser.scope == .cards ? "Apple Pay" : browser.scope == .system ? "Device" : "Media")
+                        .font(.callout.weight(.semibold))
+                    if browser.scope == .cards {
+                        Text("Walletの券面です。名前、下4桁、画像だけを表示し、読み出し後に端末へ戻します。")
+                            .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if browser.scope == .system {
                         TextField("絶対パスを貼り付け", text: $pathDraft)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.callout, design: .monospaced))
@@ -101,6 +117,8 @@ private struct BrowserView: View {
                     ContentUnavailableView("USBデバイスを接続", systemImage: "cable.connector",
                         description: Text("iPad / iPhoneのロックを解除し、このMacを信頼してから再検索してください。"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if browser.scope == .cards {
+                    cardBrowser
                 } else {
                     Table(visibleEntries, selection: $browser.selection) {
                         TableColumn("名前") { entry in
@@ -160,14 +178,14 @@ private struct BrowserView: View {
                     if browser.busy { ProgressView().controlSize(.small) }
                     Text(browser.status).lineLimit(1)
                     Spacer()
-                    Text("\(visibleEntries.count) 項目")
-                    Text(browser.scope == .system ? "実機DVT · ダブルクリックで移動" : "転送上限 128 MiB")
+                    Text(browser.scope == .cards ? "\(visibleCards.count) 枚" : "\(visibleEntries.count) 項目")
+                    Text(browser.scope == .cards ? "券面のみ · 下4桁" : browser.scope == .system ? "実機DVT · ダブルクリックで移動" : "転送上限 128 MiB")
                         .foregroundStyle(.tertiary)
                 }.font(.caption).foregroundStyle(.secondary).padding(12)
             }
             .disabled(browser.busy)
             .navigationTitle(browser.device?.name ?? "Airlift Browser")
-            .searchable(text: $search, prompt: "このフォルダを検索")
+            .searchable(text: $search, prompt: browser.scope == .cards ? "カードを検索" : "このフォルダを検索")
             .toolbar {
                 ToolbarItemGroup {
                     Button("更新", systemImage: "arrow.clockwise") { browser.reload() }
@@ -176,7 +194,7 @@ private struct BrowserView: View {
                         naming = NameRequest(entry: nil)
                     }.disabled(browser.deviceID == nil || !browser.canModify)
                     Button("送信", systemImage: "square.and.arrow.up") { browser.upload() }
-                        .disabled(browser.deviceID == nil)
+                        .disabled(browser.deviceID == nil || browser.scope == .cards)
                     Button("Macに保存", systemImage: "square.and.arrow.down") { browser.download() }
                         .disabled(browser.selected?.isFile != true)
                     Button("開く", systemImage: "folder") { browser.openSelected() }
@@ -217,6 +235,18 @@ private struct BrowserView: View {
             PoCView(browser: browser,
                     initialTarget: browser.scope == .system ? browser.path : "/var/mobile/Documents")
         }
+        .confirmationDialog("元の券面に戻しますか？", isPresented: Binding(
+            get: { restoringCard != nil },
+            set: { if !$0 { restoringCard = nil } }
+        ), titleVisibility: .visible) {
+            Button("Appleの画像を戻す") {
+                if let card = restoringCard { browser.restoreCard(card) }
+                restoringCard = nil
+            }
+            Button("キャンセル", role: .cancel) { restoringCard = nil }
+        } message: {
+            Text("端末に保存されている元画像のURLから取得し、今の券面と入れ替えます。")
+        }
         .confirmationDialog("「\(deletingEntry?.name ?? "")」を削除しますか？", isPresented: $showDelete, titleVisibility: .visible) {
             Button("削除", role: .destructive) {
                 if let entry = deletingEntry { browser.remove(entry) }
@@ -228,6 +258,74 @@ private struct BrowserView: View {
                  ? "AirTrafficでMediaへ回収してから完全に削除します。元に戻せません。通常ファイルだけが対象です。"
                  : "ゴミ箱には移動しません。フォルダは空の場合だけ削除します。")
         }
+    }
+
+    private var cardBrowser: some View {
+        Group {
+            if browser.busy && browser.cards.isEmpty {
+                ProgressView("Apple Payの券面を読み込んでいます")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if visibleCards.isEmpty {
+                ContentUnavailableView("支払いカードはありません", systemImage: "creditcard",
+                    description: Text(search.isEmpty
+                        ? "この端末のWalletに支払いカードがありません。"
+                        : "一致するカードはありません。"))
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
+                        ForEach(visibleCards) { card in
+                            VStack(alignment: .leading, spacing: 8) {
+                                cardFace(card)
+                                    .id(card.thumbnailPath ?? card.id)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 164)
+                                Text(card.title).font(.headline).lineLimit(1)
+                                if !card.subtitle.isEmpty {
+                                    Text(card.subtitle)
+                                        .font(.callout.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                HStack {
+                                    Button("差し替え") { pickReplacement(for: card) }
+                                    Button("元の画像") { restoringCard = card }
+                                }
+                                .disabled(card.assets.isEmpty || browser.busy)
+                            }
+                            .padding(12)
+                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+    }
+
+    private func cardFace(_ card: PayCard) -> some View {
+        let image = card.thumbnailPath.flatMap { NSImage(contentsOfFile: $0) }
+        return Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.quaternary)
+                    .overlay(Image(systemName: "creditcard").font(.largeTitle).foregroundStyle(.secondary))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .accessibilityLabel("\(card.title) \(card.subtitle)")
+    }
+
+    private func pickReplacement(for card: PayCard) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff, .pdf]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "券面いっぱいに切り取って、このカードへ書き込みます。"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        browser.replaceCard(card, with: url)
     }
 
     private func beginRename(_ entry: Entry) {

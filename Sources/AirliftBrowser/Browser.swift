@@ -40,6 +40,40 @@ struct Entry: Decodable, Identifiable, Sendable {
 enum BrowseScope: String, Sendable {
     case media
     case system
+    case cards
+}
+
+struct CardAsset: Decodable, Identifiable, Sendable {
+    let name: String
+    let width: Int
+    let height: Int
+    var id: String { name }
+}
+
+struct PayCard: Decodable, Identifiable, Sendable {
+    let id: String
+    let title: String
+    let subtitle: String
+    var thumbnailPath: String?
+    let assets: [CardAsset]
+    let sourceURL: String?
+}
+
+private struct CardEditResult: Decodable, Sendable {
+    let ok: Bool
+    let error: String?
+    let thumbnailPath: String?
+    let walletRestarted: Bool?
+    let cacheCleared: Bool?
+}
+
+private struct CardListResult: Decodable, Sendable {
+    let ok: Bool
+    let error: String?
+    let cards: [PayCard]?
+    let snapshotPath: String?
+    let restored: Bool?
+    let cleanupComplete: Bool?
 }
 
 private struct Reply: Decodable, Sendable {
@@ -156,6 +190,70 @@ private func writeOutside(_ deviceID: String, target: String, local: URL) async 
         guard process.terminationStatus == 0, result.ok,
               result.exactBytesVerified == true, result.cleanupComplete == true else {
             throw BridgeError(message: result.error ?? "Airlift書込みの照合または後片付けに失敗しました。")
+        }
+        return result
+    }.value
+}
+
+private func listPayCards(_ deviceID: String) async throws -> CardListResult {
+    try await Task.detached(priority: .userInitiated) {
+        let process = Process()
+        let script = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/AirliftPoC/list_cards.py")
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["PYTHONDONTWRITEBYTECODE": "1"]) { _, new in new }
+        process.arguments = [script.path, "--device", deviceID]
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard let result = try? JSONDecoder().decode(CardListResult.self, from: data) else {
+            let detail = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let clipped = detail.map { String($0.prefix(240)) }
+            throw BridgeError(message: clipped?.isEmpty == false
+                ? "Apple Payカードの一覧を読み取れませんでした。\n\(clipped!)"
+                : "Apple Payカードの一覧を読み取れませんでした。")
+        }
+        guard process.terminationStatus == 0, result.ok, result.restored == true,
+              result.cleanupComplete == true else {
+            throw BridgeError(message: result.error ?? "Apple Payカードの読み出しまたは端末への復元に失敗しました。")
+        }
+        return result
+    }.value
+}
+
+private func editCard(_ deviceID: String, arguments: [String]) async throws -> CardEditResult {
+    try await Task.detached(priority: .userInitiated) {
+        let process = Process()
+        let script = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/AirliftPoC/edit_card.py")
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["PYTHONDONTWRITEBYTECODE": "1"]) { _, new in new }
+        process.arguments = [script.path, "--device", deviceID] + arguments
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard let result = try? JSONDecoder().decode(CardEditResult.self, from: data) else {
+            let detail = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw BridgeError(message: detail?.isEmpty == false
+                ? "券面を書き換えられませんでした。\n\(detail!.prefix(240))"
+                : "券面を書き換えられませんでした。")
+        }
+        guard process.terminationStatus == 0, result.ok else {
+            throw BridgeError(message: result.error ?? "券面の書き換えまたは復元に失敗しました。")
         }
         return result
     }.value
@@ -314,6 +412,9 @@ final class Browser {
     var backStack: [(BrowseScope, String)] = []
     var forwardStack: [(BrowseScope, String)] = []
     var selection: String?
+    var cards: [PayCard] = []
+    var cardsLoaded = false
+    private var cardSnapshot: String?
     var busy = false
     var error: String?
     var status = "USBでiPad / iPhoneを接続してください"
@@ -351,8 +452,10 @@ final class Browser {
             let found = try await bridge(["devices"]).devices ?? []
             self.devices = found.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             if !found.contains(where: { $0.id == self.deviceID }) {
+                self.discardCards()
                 self.deviceID = found.first(where: { $0.product.hasPrefix("iPad") })?.id ?? self.devices.first?.id
                 self.path = "/"
+                self.scope = .media
             }
             self.entries = []
             self.selection = nil
@@ -362,6 +465,7 @@ final class Browser {
 
     func connect(_ id: String?) {
         guard id != deviceID, !busy else { return }
+        discardCards()
         deviceID = id
         entries = []
         selection = nil
@@ -428,7 +532,38 @@ final class Browser {
     }
 
     private func load(_ target: String) async throws {
+        if scope == .cards {
+            path = "/"
+            if !cardsLoaded { try await loadCards() }
+            return
+        }
         apply(try await fetchListing(target), path: target)
+    }
+
+    private func discardCards() {
+        if let cardSnapshot {
+            try? FileManager.default.removeItem(atPath: cardSnapshot)
+        }
+        cardSnapshot = nil
+        cards = []
+        cardsLoaded = false
+    }
+
+    private func loadCards() async throws {
+        guard let id = deviceID else { throw BridgeError(message: "USB端末が選択されていません。") }
+        let result = try await listPayCards(id)
+        if let cardSnapshot, cardSnapshot != result.snapshotPath {
+            try? FileManager.default.removeItem(atPath: cardSnapshot)
+        }
+        cardSnapshot = result.snapshotPath
+        cards = result.cards ?? []
+        cardsLoaded = true
+        path = "/"
+        entries = []
+        selection = nil
+        status = cards.isEmpty
+            ? "支払いカードはありません。端末側のCardsは元の場所へ戻しました。"
+            : "Apple Payカード \(cards.count) 枚。端末側のCardsは元の場所へ戻しました。"
     }
 
     func openPastedPath(_ raw: String) {
@@ -490,9 +625,81 @@ final class Browser {
     }
 
     func reload() {
+        if scope == .cards {
+            perform("Apple Payカードを読み込み") { try await self.loadCards() }
+            return
+        }
         perform(scope == .media ? "フォルダを読み込み" : "実機階層を読み込み") {
             try await self.load(self.path)
         }
+    }
+
+    func showCards() {
+        guard scope != .cards else { return }
+        let previous = (scope, path)
+        if cardsLoaded {
+            scope = .cards
+            path = "/"
+            entries = []
+            selection = nil
+            backStack.append(previous)
+            forwardStack.removeAll()
+            locationToken += 1
+            return
+        }
+        scope = .cards
+        path = "/"
+        perform("Apple Payカードを読み込み") {
+            do {
+                try await self.loadCards()
+                self.backStack.append(previous)
+                self.forwardStack.removeAll()
+            } catch {
+                self.scope = previous.0
+                self.path = previous.1
+                throw error
+            }
+        }
+    }
+
+    func replaceCard(_ card: PayCard, with url: URL) {
+        guard let deviceID, !card.assets.isEmpty else { return }
+        perform("券面を差し替えています") {
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(UUID().uuidString).\(url.pathExtension)")
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            try FileManager.default.copyItem(at: url, to: copy)
+            defer { try? FileManager.default.removeItem(at: copy) }
+            let result = try await editCard(deviceID, arguments: self.assetArguments(card) + ["--image", copy.path])
+            self.applyCardPreview(card.id, result)
+            self.status = result.walletRestarted == true
+                ? "券面を差し替え、Walletを再起動しました。"
+                : "券面を差し替えました。Walletを開き直すと反映されます。"
+        }
+    }
+
+    func restoreCard(_ card: PayCard) {
+        guard let deviceID, !card.assets.isEmpty else { return }
+        perform("元の券面を戻しています") {
+            let result = try await editCard(deviceID, arguments: self.assetArguments(card) + ["--restore"])
+            self.applyCardPreview(card.id, result)
+            self.status = result.walletRestarted == true
+                ? "元の券面を戻し、Walletを再起動しました。"
+                : "元の券面を戻しました。Walletを開き直すと反映されます。"
+        }
+    }
+
+    private func applyCardPreview(_ cardID: String, _ result: CardEditResult) {
+        guard let thumb = result.thumbnailPath,
+              let index = cards.firstIndex(where: { $0.id == cardID }) else { return }
+        var updated = cards[index]
+        updated.thumbnailPath = thumb
+        cards[index] = updated
+    }
+
+    private func assetArguments(_ card: PayCard) -> [String] {
+        card.assets.flatMap { ["--asset", "\($0.name):\($0.width):\($0.height)"] } + ["--card-id=\(card.id)"]
     }
 
     func showMedia() { switchLocation(.media, path: "/") }

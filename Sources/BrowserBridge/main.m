@@ -109,7 +109,7 @@ static NSDictionary *FinishWrite(AFCConnectionRef afc, NSArray<NSString *> *args
     NSMutableArray *failures = NSMutableArray.array;
     if (!RemoveIfPresent(afc, link)) [failures addObject:@"一時リンク"];
     if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"展開ディレクトリ"];
-    sleep(2);
+    usleep(200000);
     NSDictionary *restore = RestoreBooksState(afc, snapshotRoot);
     if (![restore[@"ok"] boolValue]) [failures addObject:@"Books同期状態"];
     BOOL cleanup = failures.count == 0;
@@ -146,7 +146,7 @@ static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *arg
     NSMutableArray *failures = NSMutableArray.array;
     if (!RemoveIfPresent(afc, link)) [failures addObject:@"一時リンク"];
     if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"展開ディレクトリ"];
-    sleep(2);
+    usleep(200000);
     NSDictionary *restore = RestoreBooksState(afc, snapshotRoot);
     if (![restore[@"ok"] boolValue]) [failures addObject:@"Books同期状態"];
     BOOL cleanup = failures.count == 0;
@@ -181,6 +181,26 @@ static NSDictionary *VerifyRecovered(AFCConnectionRef afc, NSString *path,
     return observed && [observed isEqualToData:expected]
         ? @{ @"ok": @YES, @"bytes": @(observed.length) }
         : Failure(@"回収したファイルが元データと一致しませんでした。");
+}
+
+static NSDictionary *WaitRecovered(AFCConnectionRef afc, NSString *path, NSString *mode) {
+    if (!GeneratedToken(path, AIRLIFT_RECOVERED_PREFIX))
+        return Failure(@"回収ファイル名を検証できませんでした。");
+    BOOL wantAbsent = [mode isEqual:@"absent"];
+    BOOL wantDirectory = [mode isEqual:@"directory"];
+    BOOL wantFile = [mode isEqual:@"file"];
+    if (!wantAbsent && !wantDirectory && !wantFile)
+        return Failure(@"回収データの待ち方が不正です。");
+    for (NSUInteger attempt = 0; attempt < 80; attempt++) {
+        BOOL exists = AFCExists(afc, path);
+        NSString *kind = exists ? AFCFileKind(afc, path) : nil;
+        BOOL ready = (wantAbsent && !exists) ||
+            (wantDirectory && [kind isEqual:@"S_IFDIR"]) ||
+            (wantFile && [kind isEqual:@"S_IFREG"]);
+        if (ready) return @{ @"ok": @YES, @"attempts": @(attempt + 1), @"kind": kind ?: @"" };
+        usleep(50000);
+    }
+    return Failure(@"回収データの状態が変わる前に時間切れになりました。");
 }
 
 static NSDictionary *GeneratedExists(AFCConnectionRef afc, NSString *path) {
@@ -261,6 +281,170 @@ static NSDictionary *Operate(AFCConnectionRef afc, NSString *command, NSString *
     return Failure(@"不明な操作、または引数不足です。");
 }
 
+// Wallet券面の表示に必要なファイルだけ。証明書やその他のパス内容はコピーしない。
+static BOOL SafeCatalogName(NSString *name) {
+    if (!name.length || name.length > 255) return NO;
+    if ([name isEqual:@"."] || [name isEqual:@".."]) return NO;
+    return [name rangeOfString:@"/"].location == NSNotFound;
+}
+
+static NSArray<NSString *> *CatalogChildren(AFCConnectionRef afc, NSString *path, BOOL *ok) {
+    *ok = NO;
+    AFCDirectoryRef directory = NULL;
+    if (AFCDirectoryOpen(afc, path.fileSystemRepresentation, &directory) != 0 || !directory)
+        return nil;
+    NSMutableArray<NSString *> *children = NSMutableArray.array;
+    BOOL readOK = YES;
+    for (NSUInteger index = 0; index < 4000; index++) {
+        char *raw = NULL;
+        if (AFCDirectoryRead(afc, directory, &raw) != 0) { readOK = NO; break; }
+        if (!raw) break;
+        NSString *name = [NSString stringWithUTF8String:raw];
+        if (!name || [name isEqual:@"."] || [name isEqual:@".."]) continue;
+        if (!SafeCatalogName(name)) { readOK = NO; break; }
+        [children addObject:name];
+    }
+    BOOL closeOK = AFCDirectoryClose(afc, directory) == 0;
+    *ok = readOK && closeOK;
+    return *ok ? children : nil;
+}
+
+static NSString *CardIDFromContainer(NSString *container) {
+    for (NSString *suffix in @[ @".cache", @".pkpass" ]) {
+        if ([container hasSuffix:suffix] && container.length > suffix.length)
+            return [container substringToIndex:container.length - suffix.length];
+    }
+    return nil;
+}
+
+static BOOL IsCatalogFile(NSString *container, NSString *file, NSSet<NSString *> *cardIDs) {
+    NSString *cardID = CardIDFromContainer(container);
+    if (!cardID || ![cardIDs containsObject:cardID]) return NO;
+    if ([container hasSuffix:@".cache"])
+        return [file isEqual:@"FrontFace"] || [file isEqual:@"PlaceHolder"] || [file isEqual:@"Preview"];
+    if (![container hasSuffix:@".pkpass"]) return NO;
+    return [file isEqual:@"pass.json"] ||
+        [file hasPrefix:@"cardBackgroundCombined"] ||
+        [file hasPrefix:@"backgroundParallax"] ||
+        [file hasPrefix:@"foregroundParallax"] ||
+        [file hasPrefix:@"staticOverlay"] ||
+        [file hasPrefix:@"dynamicLayerStaticFallback"];
+}
+
+static NSSet<NSString *> *PaymentCardIDs(AFCConnectionRef afc, NSString *root, BOOL *ok) {
+    BOOL listed = NO;
+    NSArray<NSString *> *children = CatalogChildren(afc, root, &listed);
+    if (!listed) { *ok = NO; return nil; }
+    NSMutableSet<NSString *> *identifiers = NSMutableSet.set;
+    for (NSString *name in children) {
+        if (![name hasSuffix:@".pkpass"] || ![AFCFileKind(afc, [root stringByAppendingPathComponent:name]) isEqual:@"S_IFDIR"])
+            continue;
+        NSString *passJSON = [[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"pass.json"];
+        if (![AFCFileKind(afc, passJSON) isEqual:@"S_IFREG"]) continue;
+        NSData *data = AFCReadFileWithLimit(afc, passJSON, 1024 * 1024);
+        id value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if ([value isKindOfClass:NSDictionary.class] && [(NSDictionary *)value objectForKey:@"paymentCard"]) {
+            NSString *cardID = CardIDFromContainer(name);
+            if (cardID) [identifiers addObject:cardID];
+        }
+    }
+    *ok = YES;
+    return identifiers;
+}
+
+static NSData *SanitizedPassJSON(NSData *original) {
+    id value = [NSJSONSerialization JSONObjectWithData:original options:0 error:nil];
+    if (![value isKindOfClass:NSDictionary.class] || ![(NSDictionary *)value objectForKey:@"paymentCard"])
+        return nil;
+    NSDictionary *metadata = value;
+    NSMutableDictionary *safe = [NSMutableDictionary dictionaryWithObject:@YES forKey:@"paymentCard"];
+    for (NSString *key in @[ @"organizationName", @"description" ]) {
+        id text = metadata[key];
+        if ([text isKindOfClass:NSString.class] && [text length] <= 200)
+            safe[key] = text;
+    }
+    for (NSString *key in @[ @"primaryAccountNumberSuffix", @"primaryAccountSuffix" ]) {
+        id suffix = metadata[key];
+        if (![suffix isKindOfClass:NSString.class] || [suffix length] != 4) continue;
+        if ([suffix rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location != NSNotFound)
+            continue;
+        safe[@"primaryAccountNumberSuffix"] = suffix;
+        break;
+    }
+    return [NSJSONSerialization dataWithJSONObject:safe options:0 error:nil];
+}
+
+static BOOL AcceptNewLocalDirectory(NSString *path) {
+    if (![path hasPrefix:@"/"] || path.length < 2 || path.length > 1024 || [path hasSuffix:@"/"]) return NO;
+    for (NSString *part in path.pathComponents)
+        if ([part isEqual:@".."]) return NO;
+    NSFileManager *files = NSFileManager.defaultManager;
+    BOOL directory = NO;
+    NSString *parent = path.stringByDeletingLastPathComponent;
+    if (![files fileExistsAtPath:parent isDirectory:&directory] || !directory) return NO;
+    return ![files fileExistsAtPath:path];
+}
+
+static NSDictionary *PullCardCatalog(AFCConnectionRef afc, NSString *remoteName, NSString *localPath) {
+    if (!GeneratedToken(remoteName, AIRLIFT_RECOVERED_PREFIX))
+        return Failure(@"回収ディレクトリ名を検証できませんでした。");
+    if (![AFCFileKind(afc, remoteName) isEqual:@"S_IFDIR"])
+        return Failure(@"回収したCardsディレクトリが見つかりません。");
+    if (!AcceptNewLocalDirectory(localPath))
+        return Failure(@"カード一覧の保存先が不正か、既に存在します。");
+    BOOL scanned = NO;
+    NSSet<NSString *> *cardIDs = PaymentCardIDs(afc, remoteName, &scanned);
+    if (!scanned) return Failure(@"Cardsディレクトリを読めませんでした。");
+    NSError *error = nil;
+    if (![NSFileManager.defaultManager createDirectoryAtPath:localPath withIntermediateDirectories:NO attributes:nil error:&error])
+        return Failure(error.localizedDescription ?: @"保存先を作成できませんでした。");
+
+    BOOL listed = NO;
+    NSArray<NSString *> *children = CatalogChildren(afc, remoteName, &listed);
+    if (!listed) return Failure(@"Cardsディレクトリの一覧が中断されました。");
+    NSUInteger files = 0;
+    unsigned long long bytes = 0;
+    for (NSString *container in children) {
+        NSString *cardID = CardIDFromContainer(container);
+        if (!cardID || ![cardIDs containsObject:cardID]) continue;
+        NSString *remoteContainer = [remoteName stringByAppendingPathComponent:container];
+        if (![AFCFileKind(afc, remoteContainer) isEqual:@"S_IFDIR"]) continue;
+        BOOL childOK = NO;
+        NSArray<NSString *> *inner = CatalogChildren(afc, remoteContainer, &childOK);
+        if (!childOK) return Failure(@"カード内の一覧が中断されました。");
+        NSString *localContainer = [localPath stringByAppendingPathComponent:container];
+        BOOL wroteDirectory = NO;
+        for (NSString *file in inner) {
+            if (!IsCatalogFile(container, file, cardIDs)) continue;
+            NSString *remoteFile = [remoteContainer stringByAppendingPathComponent:file];
+            if (![AFCFileKind(afc, remoteFile) isEqual:@"S_IFREG"]) continue;
+            BOOL passJSON = [file isEqual:@"pass.json"];
+            BOOL urlsFile = [file hasSuffix:@".urls"];
+            NSData *data = AFCReadFileWithLimit(afc, remoteFile, passJSON || urlsFile ? 1024 * 1024 : 16 * 1024 * 1024);
+            if (passJSON) data = data ? SanitizedPassJSON(data) : nil;
+            if (!data) {
+                if (passJSON || urlsFile) continue;
+                return Failure(@"券面ファイルを読み出せませんでした。");
+            }
+            if (bytes + data.length > 128ULL * 1024 * 1024)
+                return Failure(@"券面ファイルがサイズ上限を超えました。");
+            if (!wroteDirectory) {
+                if (![NSFileManager.defaultManager createDirectoryAtPath:localContainer
+                                               withIntermediateDirectories:NO attributes:nil error:&error])
+                    return Failure(error.localizedDescription ?: @"カードフォルダを作成できませんでした。");
+                wroteDirectory = YES;
+            }
+            if (![data writeToFile:[localContainer stringByAppendingPathComponent:file]
+                           options:NSDataWritingWithoutOverwriting error:&error])
+                return Failure(error.localizedDescription ?: @"券面ファイルを保存できませんでした。");
+            files++;
+            bytes += data.length;
+        }
+    }
+    return @{ @"ok": @YES, @"fileCount": @(files), @"totalBytes": @(bytes),
+              @"paymentCardCount": @(cardIDs.count) };
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         // A disconnected private service must not leave a hung background process.
@@ -288,10 +472,14 @@ int main(int argc, const char *argv[]) {
             ]);
         } else if (strcmp(argv[1], "verify-recovered") == 0 && argc == 5) {
             result = VerifyRecovered(session.afc, @(argv[3]), @(argv[4]));
+        } else if (strcmp(argv[1], "wait-recovered") == 0 && argc == 5) {
+            result = WaitRecovered(session.afc, @(argv[3]), @(argv[4]));
         } else if (strcmp(argv[1], "generated-exists") == 0 && argc == 4) {
             result = GeneratedExists(session.afc, @(argv[3]));
         } else if (strcmp(argv[1], "generated-kind") == 0 && argc == 4) {
             result = GeneratedKind(session.afc, @(argv[3]));
+        } else if (strcmp(argv[1], "pull-card-catalog") == 0 && argc == 5) {
+            result = PullCardCatalog(session.afc, @(argv[3]), @(argv[4]));
         } else {
             result = Operate(session.afc, @(argv[1]), @(argv[3]), argc == 5 ? @(argv[4]) : nil);
         }
