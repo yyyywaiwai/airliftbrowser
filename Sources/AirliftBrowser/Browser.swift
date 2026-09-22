@@ -1105,8 +1105,9 @@ final class Browser {
             throw BridgeError(message: "「\(url.lastPathComponent)」はシンボリックリンクです。")
         }
         if directoryItem.boolValue {
-            guard scope == .media else {
-                throw BridgeError(message: "「\(url.lastPathComponent)」はフォルダです。端末ファイルへはファイルだけ送れます。")
+            if scope != .media {
+                _ = try await writeOutside(deviceID, target: directory, local: url)
+                return
             }
             let remote = try child(url.lastPathComponent, in: directory)
             _ = try await bridge(["mkdir", deviceID, remote])
@@ -1145,10 +1146,22 @@ final class Browser {
     }
 
     func mkdir(_ name: String) {
-        guard canModify, let id = deviceID else { return }
+        guard let id = deviceID, scope != .cards else { return }
+        let directory = path
+        let scope = scope
         perform("フォルダを作成") {
-            _ = try await bridge(["mkdir", id, self.child(name)])
-            try await self.load(self.path)
+            if scope == .media {
+                _ = try await bridge(["mkdir", id, try self.child(name)])
+            } else {
+                _ = try self.child(name)
+                let root = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("airlift-mkdir-\(UUID().uuidString)", isDirectory: true)
+                defer { try? FileManager.default.removeItem(at: root) }
+                let folder = root.appendingPathComponent(name, isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                _ = try await writeOutside(id, target: directory, local: folder)
+            }
+            try await self.load(directory)
         }
     }
 
@@ -1176,11 +1189,11 @@ final class Browser {
         guard let id = deviceID, scope != .cards, !blocksNewWork else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = scope == .media
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.message = scope == .media
             ? "現在のフォルダへ送ります。フォルダも含められます。同名は上書きしません。"
-            : "現在のフォルダへファイルを書込み、全バイトを照合します。同名は上書きしません。"
+            : "現在のフォルダへファイルまたはフォルダを書込み、内容を照合します。同名は上書きしません。"
         let directory = path
         let scope = scope
         perform("ファイルを送信") {

@@ -300,7 +300,7 @@ private struct BrowserView: View {
                         .keyboardShortcut("r").disabled(browser.deviceID == nil || browser.blocksNewWork)
                     Button("フォルダ作成", systemImage: "folder.badge.plus") {
                         naming = NameRequest(entry: nil)
-                    }.disabled(browser.deviceID == nil || !browser.canModify || browser.blocksNewWork)
+                    }.disabled(browser.deviceID == nil || browser.scope == .cards || browser.blocksNewWork)
                     Button("送信", systemImage: "square.and.arrow.up") { browser.upload() }
                         .disabled(browser.deviceID == nil || browser.scope == .cards || browser.blocksNewWork)
                     Button("Macに保存", systemImage: "square.and.arrow.down") { browser.download() }
