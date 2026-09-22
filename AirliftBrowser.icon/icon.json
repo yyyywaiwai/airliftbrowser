@@ -1,0 +1,140 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "display-p3:0.42334,0.96533,1.00000,1.00000",
+          "display-p3:0.98438,0.86133,0.58057,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : "system-dark"
+    }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode" : "normal",
+          "fill" : "none",
+          "image-name" : "07-Lift-Mark 2.svg",
+          "name" : "07-Lift-Mark"
+        }
+      ],
+      "name" : "Lift Mark",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.89680,0.54269,1.00000,1.00000",
+              "display-p3:0.74724,0.47633,0.96783,1.00000"
+            ]
+          },
+          "image-name" : "06-Folder-Front 2.svg",
+          "name" : "06-Folder-Front"
+        }
+      ],
+      "name" : "Folder Front",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "05-Device-Island 2.svg",
+          "name" : "05-Device-Island"
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.83405,1.00000,0.73330,1.00000",
+              "display-p3:0.42285,0.96729,0.99121,1.00000"
+            ]
+          },
+          "image-name" : "04-Device-Sweep 2.svg",
+          "name" : "04-Device-Sweep"
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.98421,0.60924,1.00000,1.00000",
+              "display-p3:0.29536,0.00000,0.96783,1.00000"
+            ]
+          },
+          "image-name" : "03-Device-Screen 2.svg",
+          "name" : "03-Device-Screen"
+        },
+        {
+          "image-name" : "02-Device-Body 3.svg",
+          "name" : "02-Device-Body"
+        }
+      ],
+      "name" : "Device",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.88232,0.53174,0.98486,1.00000",
+              "display-p3:0.76611,0.54541,0.80518,1.00000"
+            ]
+          },
+          "image-name" : "01-Folder-Back 2.svg",
+          "name" : "01-Folder-Back"
+        }
+      ],
+      "name" : "Folder Back",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

@@ -78,6 +78,16 @@ private struct BrowserView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(browser.deviceID == nil)
                 }.padding(16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("クレジット")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                    Link("airlift", destination: URL(string: "https://github.com/0xjohnnydev/airlift")!)
+                    Link("Airlift Cards", destination: URL(string: "https://github.com/licht-jb/AirliftCards")!)
+                }
+                .font(.caption)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
             .disabled(browser.busy)

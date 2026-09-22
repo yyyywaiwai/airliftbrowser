@@ -68,6 +68,21 @@ cp airlift/airlift.py Sources/PoC/runner.py Sources/PoC/write_file.py Sources/Po
 cp Sources/DeviceFiles/container_files.py Sources/DeviceFiles/dvt_files.py "$APP/Contents/Resources/DeviceFiles/"
 cp airlift/Sources/airlift_target.h "$APP/Contents/Resources/AirliftPoC/Sources/"
 cp airlift/LICENSE "$APP/Contents/Resources/Airlift-LICENSE.txt"
+ICON_OUT="$PWD/.build/icon"
+rm -rf "$ICON_OUT"
+mkdir -p "$ICON_OUT"
+xcrun actool \
+  --compile "$ICON_OUT" \
+  --app-icon AirliftBrowser \
+  --enable-on-demand-resources NO \
+  --development-region en \
+  --target-device mac \
+  --minimum-deployment-target 14.0 \
+  --platform macosx \
+  --standalone-icon-behavior all \
+  --output-partial-info-plist "$ICON_OUT/partial.plist" \
+  "$PWD/AirliftBrowser.icon" >/dev/null
+cp "$ICON_OUT/AirliftBrowser.icns" "$ICON_OUT/Assets.car" "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -81,6 +96,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleIconFile</key><string>AirliftBrowser</string>
+<key>CFBundleIconName</key><string>AirliftBrowser</string>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP/Contents/Helpers/browser_bridge"

@@ -59,6 +59,11 @@ make open   # ビルドしてアプリを起動
   上書き検査とrename間に別プロセスが同名ファイルを作る競合は防げません。
 - MobileDeviceはmacOSの非公開フレームワークのため、将来のOS更新で互換性が変わり得ます。
 
+## クレジット
+
+- [airlift](https://github.com/0xjohnnydev/airlift) — Johnny Franks（[@0xjohnnydev](https://github.com/0xjohnnydev)）、MIT。AirTraffic 経由の端末読み書き。
+- [Airlift Cards](https://github.com/licht-jb/AirliftCards) — MIT。Apple Pay 券面の読み出しと差し替え。
+
 ## 元プロジェクトとの関係
 
 [0xjohnnydev/airlift](https://github.com/0xjohnnydev/airlift) を `airlift/` に
