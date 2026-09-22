@@ -26,8 +26,10 @@ make open   # ビルドしてアプリを起動
 - 「端末ファイル」はDVTが公開する実項目をFinder風の階層として表示します。
   パス欄に絶対パスを貼り付けて Return または「移動」で、その場所を一覧に表示します。
   ファイルパスの場合は親フォルダを開き、その項目を選択します。ダブルクリック、戻る・進む・上へでも移動できます。
-- `Containers/Data/Application`はDVTの全実コンテナ、`Containers/Shared/AppGroup`は
-  CoreDeviceで参照可能な実コンテナを列挙し、各コンテナ内も実項目を表示します。
+- `Containers/Data/Application`はDVTの全実コンテナを列挙し、インストール情報の
+  コンテナパスからアプリ名とBundle IDを併記します。記録がないコンテナは、読める
+  起動スナップショット名からBundle IDを補います。`Containers/Shared/AppGroup`も
+  同じインストール情報でグループIDを表示し、各コンテナ内は実項目を表示します。
 - `/var/containers/Bundle/Application`はUUIDにアプリ名とBundle IDを併記し、
   UUID内の`.app`にも同じ情報を表示します。
 - 端末ファイルの通常ファイルも「Macに保存」で抽出できます。AirTrafficでMediaへ一時回収し、
