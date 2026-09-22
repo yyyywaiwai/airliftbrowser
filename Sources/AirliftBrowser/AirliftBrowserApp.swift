@@ -12,6 +12,14 @@ struct AirliftBrowserApp: App {
     }
 }
 
+private struct LocationRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
 private struct BrowserView: View {
     @State private var browser = Browser()
     @State private var search = ""
@@ -351,7 +359,7 @@ private struct BrowserView: View {
                 .background(selected ? Color.accentColor.opacity(0.18) : .clear,
                             in: RoundedRectangle(cornerRadius: 7))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LocationRowButtonStyle())
         .disabled(browser.deviceID == nil || browser.busy)
     }
 }
