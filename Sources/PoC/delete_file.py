@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Delete one known regular file outside Media through AirTraffic."""
+"""Delete or extract one file or directory outside Media through AirTraffic."""
 from copy import deepcopy
 import argparse
 import importlib.util
@@ -60,8 +60,35 @@ def target_present(device_id, parent, leaf):
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return False
     return completed.returncode == 0 and any(
-        entry.get("name") == leaf and entry.get("kind") == "S_IFREG"
+        entry.get("name") == leaf and entry.get("kind") in ("S_IFREG", "S_IFDIR")
         for entry in reply.get("entries", []))
+
+
+def bridge_call(args, timeout=120):
+    reply = airlift.run_json([os.fspath(BRIDGE), *args], timeout=timeout)
+    if reply.get("exitCode") or not reply.get("ok"):
+        raise airlift.AirLiftError(reply.get("error") or "端末ファイル処理に失敗しました。")
+    return reply
+
+
+def pull_tree(device_id, media_path, local_path):
+    listing = bridge_call(["list", device_id, media_path], timeout=75)
+    os.makedirs(local_path)
+    total = 0
+    for entry in listing.get("entries") or []:
+        name, kind, child = entry.get("name"), entry.get("kind"), entry.get("id")
+        if (not isinstance(name, str) or not isinstance(child, str) or name in (".", "..")
+                or "/" in name or "\x00" in name):
+            raise airlift.AirLiftError("回収したフォルダに不正な項目があります。")
+        destination = os.path.join(local_path, name)
+        if kind == "S_IFDIR":
+            total += pull_tree(device_id, child, destination)
+        elif kind == "S_IFREG":
+            copied = bridge_call(["get", device_id, child, destination])
+            total += int(copied.get("bytes") or 0)
+        else:
+            raise airlift.AirLiftError(f"通常ファイルとフォルダ以外は抽出できません: {name}")
+    return total
 
 
 def restore_file(udid, restore_id, destination, parent, leaf, recovered):
@@ -129,6 +156,7 @@ def delete_file(device_id, target, local_path=None):
         extracted = None
         type_error = None
         finish = None
+        finish_timeout = 90
         try:
             stage = airlift.native("stage", udid, source, link, recovered,
                 os.fspath(archive), os.fspath(books), os.fspath(snapshot_root))
@@ -146,9 +174,20 @@ def delete_file(device_id, target, local_path=None):
                 raise airlift.AirLiftError(traffic.get("error", "AirTraffic delete relocation failed"))
             observed = airlift.run_json([
                 os.fspath(BRIDGE), "generated-kind", udid, recovered], timeout=60)
-            if observed.get("exitCode") or observed.get("kind") != "S_IFREG":
+            kind = observed.get("kind")
+            if observed.get("exitCode") or kind not in ("S_IFREG", "S_IFDIR"):
                 should_restore = True
-                type_error = "通常ファイルだけ削除できます。対象は元の場所へ復元しました。"
+                type_error = "通常ファイルまたはフォルダだけ削除できます。対象は元の場所へ復元しました。"
+            elif kind == "S_IFDIR" and local_path:
+                should_restore = True
+                try:
+                    extracted = {"ok": True, "exitCode": 0,
+                                 "bytes": pull_tree(udid, "/" + recovered, local_path)}
+                except airlift.AirLiftError as error:
+                    extracted = {"ok": False, "exitCode": 1, "error": str(error)}
+            elif kind == "S_IFDIR":
+                should_restore = False
+                finish_timeout = 900
             elif local_path:
                 extracted = airlift.run_json([
                     os.fspath(BRIDGE), "get", udid, "/" + recovered, local_path], timeout=120)
@@ -160,7 +199,7 @@ def delete_file(device_id, target, local_path=None):
                 finish = airlift.run_json([
                     os.fspath(BRIDGE), "finish-delete", udid, source, link,
                     recovered, os.fspath(snapshot_root),
-                    "cleanup" if should_restore else "delete"], timeout=90)
+                    "cleanup" if should_restore else "delete"], timeout=finish_timeout)
         if should_restore and not restored:
             raise airlift.AirLiftError(
                 f"対象を元へ復元できませんでした。回収データをMedia/{recovered}に保持しています。")

@@ -126,6 +126,41 @@ static NSDictionary *FinishWrite(AFCConnectionRef afc, NSArray<NSString *> *args
              @"bytesMatch": @YES, @"cleanupComplete": @NO };
 }
 
+static BOOL RemoveMediaTree(AFCConnectionRef afc, NSString *path, NSUInteger depth) {
+    alarm(120);
+    if (depth > 40 || !path.length) return NO;
+    NSString *kind = AFCFileKind(afc, path);
+    if (!kind) return YES;
+    if ([kind isEqual:@"S_IFDIR"]) {
+        AFCDirectoryRef directory = NULL;
+        if (AFCDirectoryOpen(afc, path.fileSystemRepresentation, &directory) != 0 || !directory)
+            return NO;
+        NSMutableArray<NSString *> *children = NSMutableArray.array;
+        BOOL readOK = YES;
+        BOOL sawEnd = NO;
+        for (NSUInteger index = 0; index < 100000; index++) {
+            char *raw = NULL;
+            int status = AFCDirectoryRead(afc, directory, &raw);
+            if (status != 0) { readOK = NO; break; }
+            if (!raw) { sawEnd = YES; break; }
+            NSString *name = [NSString stringWithUTF8String:raw];
+            if (!name || [name isEqual:@"."] || [name isEqual:@".."]) continue;
+            if ([name rangeOfString:@"/"].location != NSNotFound || name.length > 255) {
+                readOK = NO;
+                break;
+            }
+            [children addObject:name];
+        }
+        BOOL closeOK = AFCDirectoryClose(afc, directory) == 0;
+        if (!readOK || !closeOK || !sawEnd) return NO;
+        for (NSString *name in children) {
+            if (!RemoveMediaTree(afc, [path stringByAppendingPathComponent:name], depth + 1))
+                return NO;
+        }
+    }
+    return AFCRemovePath(afc, path.fileSystemRepresentation) == 0 && !AFCExists(afc, path);
+}
+
 static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *args) {
     NSString *source = args[0];
     NSString *link = args[1];
@@ -140,8 +175,12 @@ static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *arg
     if (!safe) return Failure(@"削除後処理の引数を検証できませんでした。");
 
     NSString *kind = AFCFileKind(afc, recovered);
-    BOOL deleted = deleteRequested && [kind isEqual:@"S_IFREG"] &&
-        AFCRemovePath(afc, recovered.fileSystemRepresentation) == 0 && !AFCExists(afc, recovered);
+    BOOL deleted = NO;
+    if (deleteRequested && [kind isEqual:@"S_IFREG"]) {
+        deleted = AFCRemovePath(afc, recovered.fileSystemRepresentation) == 0 && !AFCExists(afc, recovered);
+    } else if (deleteRequested && [kind isEqual:@"S_IFDIR"]) {
+        deleted = RemoveMediaTree(afc, recovered, 0);
+    }
     BOOL settled = deleteRequested ? deleted : !AFCExists(afc, recovered);
     NSMutableArray *failures = NSMutableArray.array;
     if (!RemoveIfPresent(afc, link)) [failures addObject:@"一時リンク"];
@@ -270,13 +309,9 @@ static NSDictionary *Operate(AFCConnectionRef afc, NSString *command, NSString *
             ? @{ @"ok": @YES } : Failure(@"名前変更に失敗しました。");
     }
     if ([command isEqual:@"remove"]) {
-        if ([kind isEqual:@"S_IFDIR"]) {
-            NSDictionary *listing = List(afc, path);
-            if (![listing[@"ok"] boolValue] || [listing[@"entries"] count])
-                return Failure(@"空のフォルダだけ削除できます。");
-        } else if (![kind isEqual:@"S_IFREG"]) return Failure(@"通常ファイルまたは空のフォルダを選択してください。");
-        return AFCRemovePath(afc, path.fileSystemRepresentation) == 0
-            ? @{ @"ok": @YES } : Failure(@"削除に失敗しました。");
+        if (![kind isEqual:@"S_IFDIR"] && ![kind isEqual:@"S_IFREG"])
+            return Failure(@"通常ファイルまたはフォルダを選択してください。");
+        return RemoveMediaTree(afc, path, 0) ? @{ @"ok": @YES } : Failure(@"削除に失敗しました。");
     }
     return Failure(@"不明な操作、または引数不足です。");
 }

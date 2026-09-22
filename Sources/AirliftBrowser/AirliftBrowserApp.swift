@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -25,13 +26,33 @@ private struct BrowserView: View {
     @State private var search = ""
     @State private var pathDraft = "/"
     @State private var naming: NameRequest?
-    @State private var deletingEntry: Entry?
+    @State private var deleting: [Entry] = []
     @State private var showDelete = false
+    @State private var dropTargeted = false
     @State private var showPoC = false
     @State private var restoringCard: PayCard?
 
     private var visibleEntries: [Entry] {
         browser.entries.filter { search.isEmpty || $0.name.localizedStandardContains(search) }
+    }
+
+    private var deleteTitle: String {
+        if deleting.count == 1, let name = deleting.first?.name {
+            return "「\(name)」を削除しますか？"
+        }
+        return "\(max(deleting.count, 1)) 項目を削除しますか？"
+    }
+
+    private var deleteMessage: String {
+        let folders = deleting.contains { $0.isDirectory }
+        if browser.scope == .system {
+            return folders
+                ? "AirTrafficでMediaへ回収してから完全に削除します。フォルダは中身ごと消えます。元に戻せません。"
+                : "AirTrafficでMediaへ回収してから完全に削除します。元に戻せません。"
+        }
+        return folders
+            ? "ゴミ箱には移動しません。フォルダは中身ごと削除します。"
+            : "ゴミ箱には移動しません。"
     }
 
     private var visibleCards: [PayCard] {
@@ -98,7 +119,7 @@ private struct BrowserView: View {
                 .padding(.bottom, 12)
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
-            .disabled(browser.busy)
+            .disabled(browser.blocksNewWork)
         } detail: {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -138,8 +159,24 @@ private struct BrowserView: View {
                 } else if browser.scope == .cards {
                     cardBrowser
                 } else {
-                    Table(visibleEntries, selection: $browser.selection) {
-                        TableColumn("名前") { entry in
+                    VStack(spacing: 0) {
+                        if !browser.pending.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(browser.pending) { item in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "arrow.up.doc").foregroundStyle(Color.accentColor)
+                                        Text(item.name).lineLimit(1)
+                                        Spacer(minLength: 8)
+                                        ActivityBar(fraction: item.fraction)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            Divider()
+                        }
+                        Table(of: Entry.self, selection: $browser.selection) {
+                            TableColumn("名前") { entry in
                             HStack(spacing: 8) {
                                 Image(systemName: entry.isDirectory ? "folder.fill" : entry.isFile ? "doc" : "link")
                                     .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.primary)
@@ -149,6 +186,9 @@ private struct BrowserView: View {
                                     if let subtitle = entry.subtitle {
                                         Text(subtitle).font(.caption).foregroundStyle(.secondary)
                                     }
+                                    if let activity = browser.rowActivity[entry.id] {
+                                        ActivityBar(fraction: activity.fraction)
+                                    }
                                 }
                             }
                         }.width(min: 180, ideal: 380)
@@ -156,72 +196,124 @@ private struct BrowserView: View {
                         TableColumn("サイズ") { entry in
                             Text(entry.sizeLabel).monospacedDigit().foregroundStyle(.secondary)
                         }.width(100)
-                    }
-                    .contextMenu(forSelectionType: String.self) { ids in
-                        if ids.count == 1, let id = ids.first,
-                           let entry = browser.entries.first(where: { $0.id == id }) {
-                            if entry.isDirectory {
+                        } rows: {
+                            ForEach(visibleEntries) { entry in
+                                TableRow(entry)
+                            }
+                        }
+                        .contextMenu(forSelectionType: String.self) { ids in
+                            let chosen = browser.entries.filter { ids.contains($0.id) }
+                            if chosen.count == 1, let entry = chosen.first, entry.isDirectory {
                                 Button("開く") { browser.navigate(entry.id) }
                             }
-                            if entry.isFile {
-                                Button("Macに保存…") { browser.selection = id; browser.download() }
+                            if !chosen.isEmpty, chosen.allSatisfy(browser.canExport) {
+                                Button("Macに保存…") {
+                                    browser.selection = Set(chosen.map(\.id))
+                                    browser.download()
+                                }
                             }
-                            if browser.canModify && (entry.isFile || entry.isDirectory) {
+                            if chosen.count == 1, let entry = chosen.first,
+                               browser.canModify, entry.isFile || entry.isDirectory {
                                 Button("名前を変更…") { beginRename(entry) }
                             }
-                            if browser.canDelete(entry) {
+                            if !chosen.isEmpty, chosen.allSatisfy(browser.canDelete) {
                                 Divider()
-                                Button("削除…", role: .destructive) { deletingEntry = entry; showDelete = true }
+                                Button("削除…", role: .destructive) {
+                                    deleting = chosen
+                                    showDelete = true
+                                }
+                                .disabled(browser.blocksNewWork)
                             }
-                        }
-                    } primaryAction: { ids in
-                        if let id = ids.first, let entry = browser.entries.first(where: { $0.id == id }), entry.isDirectory {
+                        } primaryAction: { ids in
+                            guard ids.count == 1, let id = ids.first,
+                                  let entry = browser.entries.first(where: { $0.id == id }),
+                                  entry.isDirectory else { return }
                             browser.navigate(entry.id)
                         }
-                    }
-                    .overlay {
-                        if visibleEntries.isEmpty && !browser.busy {
-                            ContentUnavailableView(
-                                search.isEmpty
-                                    ? (browser.notice == nil ? "このフォルダは空です" : "子項目名を列挙できません")
-                                    : "一致する項目はありません",
-                                systemImage: search.isEmpty ? "folder.badge.questionmark" : "magnifyingglass",
-                                description: browser.notice.map(Text.init))
-                                .allowsHitTesting(false)
+                        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                            // Dropping a row back onto this list is not an import. Reading it as a file URL
+                            // fails with "Could not coerce an item to class NSURL" and leaves dragging stuck.
+                            if FinderDragGate.active || providers.contains(where: {
+                                $0.registeredTypeIdentifiers.contains(deviceDragType)
+                            }) || !providers.contains(where: {
+                                $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+                            }) {
+                                return false
+                            }
+                            guard !browser.blocksNewWork, browser.deviceID != nil else { return false }
+                            browser.importProviders(providers)
+                            return true
+                        }
+                        .overlay {
+                            if dropTargeted {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                                    .padding(4)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .overlay(FinderDragMonitor(browser: browser, entries: visibleEntries))
+                        .overlay {
+                            if visibleEntries.isEmpty && !browser.busy && browser.pending.isEmpty {
+                                ContentUnavailableView(
+                                    search.isEmpty
+                                        ? (browser.notice == nil ? "このフォルダは空です" : "子項目名を列挙できません")
+                                        : "一致する項目はありません",
+                                    systemImage: search.isEmpty ? "folder.badge.questionmark" : "magnifyingglass",
+                                    description: Text(browser.notice ?? "Finderからファイルをドロップできます。"))
+                                    .allowsHitTesting(false)
+                            }
                         }
                     }
                 }
                 Divider()
                 HStack {
-                    if browser.busy { ProgressView().controlSize(.small) }
+                    if browser.batchTotal > 0 {
+                        ProgressView(value: Double(browser.batchDone), total: Double(browser.batchTotal))
+                            .progressViewStyle(.linear)
+                            .controlSize(.small)
+                            .frame(width: 120)
+                    } else if browser.busy || browser.exportsInFlight > 0 {
+                        ProgressView().controlSize(.small)
+                    }
                     Text(browser.status).lineLimit(1)
                     Spacer()
+                    if !browser.selection.isEmpty && browser.scope != .cards {
+                        Text("\(browser.selection.count) 選択")
+                    }
                     Text(browser.scope == .cards ? "\(visibleCards.count) 枚" : "\(visibleEntries.count) 項目")
-                    Text(browser.scope == .cards ? "券面のみ · 下4桁" : browser.scope == .system ? "実機DVT · ダブルクリックで移動" : "転送上限 128 MiB")
+                    Text(browser.scope == .cards ? "券面のみ · 下4桁" : browser.scope == .system ? "ドラッグで送受信" : "ドラッグで送受信 · 128 MiB")
                         .foregroundStyle(.tertiary)
                 }.font(.caption).foregroundStyle(.secondary).padding(12)
             }
-            .disabled(browser.busy)
+            .onDeleteCommand {
+                let targets = browser.selectedEntries.filter(browser.canDelete)
+                guard !browser.blocksNewWork, !targets.isEmpty else { return }
+                deleting = targets
+                showDelete = true
+            }
             .navigationTitle(browser.device?.name ?? "Airlift Browser")
             .searchable(text: $search, prompt: browser.scope == .cards ? "カードを検索" : "このフォルダを検索")
             .toolbar {
                 ToolbarItemGroup {
                     Button("更新", systemImage: "arrow.clockwise") { browser.reload() }
-                        .keyboardShortcut("r").disabled(browser.deviceID == nil)
+                        .keyboardShortcut("r").disabled(browser.deviceID == nil || browser.blocksNewWork)
                     Button("フォルダ作成", systemImage: "folder.badge.plus") {
                         naming = NameRequest(entry: nil)
-                    }.disabled(browser.deviceID == nil || !browser.canModify)
+                    }.disabled(browser.deviceID == nil || !browser.canModify || browser.blocksNewWork)
                     Button("送信", systemImage: "square.and.arrow.up") { browser.upload() }
-                        .disabled(browser.deviceID == nil || browser.scope == .cards)
+                        .disabled(browser.deviceID == nil || browser.scope == .cards || browser.blocksNewWork)
                     Button("Macに保存", systemImage: "square.and.arrow.down") { browser.download() }
-                        .disabled(browser.selected?.isFile != true)
+                        .disabled(browser.blocksNewWork || browser.selectedEntries.isEmpty
+                                  || browser.selectedEntries.contains { !browser.canExport($0) })
                     Button("開く", systemImage: "folder") { browser.openSelected() }
-                        .disabled(browser.selected?.isDirectory != true)
+                        .disabled(browser.blocksNewWork || browser.selected?.isDirectory != true)
                     Button("削除", systemImage: "trash", role: .destructive) {
-                        deletingEntry = browser.selected
-                        showDelete = deletingEntry != nil
+                        deleting = browser.selectedEntries.filter(browser.canDelete)
+                        showDelete = !deleting.isEmpty
                     }
-                    .disabled(browser.selected.map { !browser.canDelete($0) } ?? true)
+                    .disabled(browser.blocksNewWork || browser.selectedEntries.isEmpty
+                              || browser.selectedEntries.contains { !browser.canDelete($0) })
                     if browser.scope == .system {
                         Button("このフォルダを検証", systemImage: "checkmark.shield") {
                             showPoC = true
@@ -230,7 +322,6 @@ private struct BrowserView: View {
                 }
             }
         }
-        .disabled(browser.busy)
         .frame(minWidth: 800, minHeight: 480)
         .task { browser.scan() }
         .onChange(of: browser.path) {
@@ -265,16 +356,15 @@ private struct BrowserView: View {
         } message: {
             Text("端末に保存されている元画像のURLから取得し、今の券面と入れ替えます。")
         }
-        .confirmationDialog("「\(deletingEntry?.name ?? "")」を削除しますか？", isPresented: $showDelete, titleVisibility: .visible) {
+        .confirmationDialog(deleteTitle, isPresented: $showDelete, titleVisibility: .visible) {
             Button("削除", role: .destructive) {
-                if let entry = deletingEntry { browser.remove(entry) }
-                deletingEntry = nil
+                let entries = deleting
+                deleting = []
+                browser.remove(entries)
             }
-            Button("キャンセル", role: .cancel) {}
+            Button("キャンセル", role: .cancel) { deleting = [] }
         } message: {
-            Text(browser.scope == .system
-                 ? "AirTrafficでMediaへ回収してから完全に削除します。元に戻せません。通常ファイルだけが対象です。"
-                 : "ゴミ箱には移動しません。フォルダは空の場合だけ削除します。")
+            Text(deleteMessage)
         }
     }
 
@@ -360,7 +450,24 @@ private struct BrowserView: View {
                             in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(LocationRowButtonStyle())
-        .disabled(browser.deviceID == nil || browser.busy)
+        .disabled(browser.deviceID == nil || browser.blocksNewWork)
+    }
+}
+
+private struct ActivityBar: View {
+    let fraction: Double?
+
+    var body: some View {
+        Group {
+            if let fraction {
+                ProgressView(value: min(max(fraction, 0), 1))
+            } else {
+                ProgressView()
+            }
+        }
+        .progressViewStyle(.linear)
+        .controlSize(.small)
+        .frame(width: 92)
     }
 }
 
@@ -400,7 +507,7 @@ private struct PoCView: View {
                 Button("閉じる") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("検証を実行") { browser.pocResult = nil; browser.runPoC(target: target) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(browser.busy || !target.hasPrefix("/") || target == "/")
+                    .disabled(browser.blocksNewWork || !target.hasPrefix("/") || target == "/")
             }
         }
         .padding(24)

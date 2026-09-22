@@ -46,10 +46,15 @@ def main():
             remote_files.add(source)
             call("put", udid, source, str(local))
             call("put", udid, source, str(local), succeeds=False)
-            call("remove", udid, root, succeeds=False)
+            call("remove", udid, "/", succeeds=False)
             entries = call("list", udid, root)["entries"]
             assert len(entries) == 1 and entries[0]["size"] == len(payload), entries
-            report["checks"].append("mkdir, Unicode upload, overwrite and nonempty-delete rejection")
+            nested = root + "/nested"
+            call("mkdir", udid, nested)
+            call("put", udid, nested + "/leaf.bin", str(local))
+            call("remove", udid, nested)
+            assert all(item["id"] != nested for item in call("list", udid, root)["entries"])
+            report["checks"].append("mkdir, Unicode upload, overwrite, root-delete rejection, nonempty directory delete")
             remote_files.add(renamed)
             call("rename", udid, source, renamed)
             remote_files.discard(source)
