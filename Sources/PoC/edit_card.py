@@ -334,6 +334,26 @@ def replace_assets(device_id, card_id, assets, image_path):
     return replaced, os.fspath(preview)
 
 
+def sniff_extension(payload):
+    if payload.startswith(PNG_MAGIC):
+        return "png"
+    if payload.startswith(b"%PDF-"):
+        return "pdf"
+    if payload.startswith(b"\xff\xd8"):
+        return "jpg"
+    if payload[4:8] == b"ftyp" and (b"heic" in payload[:32] or b"heif" in payload[:32]):
+        return "heic"
+    return "bin"
+
+
+def run_export(device_id, card_id, destination):
+    if not isinstance(destination, str) or "\0" in destination or not os.path.isabs(destination):
+        raise ValueError("保存先が不正です。")
+    payload = download_original(read_original_url(device_id, card_id))
+    Path(destination).write_bytes(payload)
+    return {"ok": True, "fileExtension": sniff_extension(payload)}
+
+
 def download_original(url):
     if not isinstance(url, str) or not url.startswith("https://") or len(url) > 2000:
         raise ValueError("元画像のURLがhttpsではありません。")
@@ -449,6 +469,14 @@ def self_test():
         pass
     else:
         raise AssertionError("file URL was accepted")
+    assert sniff_extension(raw) == "png"
+    assert sniff_extension(b"%PDF-1.7") == "pdf"
+    try:
+        run_export("device", "card", "relative.png")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("relative export path was accepted")
     print("ok")
 
 
@@ -456,6 +484,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--restore", action="store_true")
+    parser.add_argument("--export", metavar="PATH")
     parser.add_argument("--device")
     parser.add_argument("--card-id")
     parser.add_argument("--image")
@@ -465,15 +494,20 @@ def main():
         self_test()
         return 0
     try:
-        assets = [parse_asset(item) for item in args.asset]
-        if not args.device or not args.card_id or not assets:
-            raise ValueError("カードと券面ファイルを指定してください。")
-        if args.restore:
-            result = run_restore(args.device, args.card_id, assets)
+        if args.export:
+            if not args.device or not args.card_id:
+                raise ValueError("カードを指定してください。")
+            result = run_export(args.device, args.card_id, args.export)
         else:
-            if not args.image:
-                raise ValueError("差し替える画像を指定してください。")
-            result = run_replace(args.device, args.card_id, assets, args.image)
+            assets = [parse_asset(item) for item in args.asset]
+            if not args.device or not args.card_id or not assets:
+                raise ValueError("カードと券面ファイルを指定してください。")
+            if args.restore:
+                result = run_restore(args.device, args.card_id, assets)
+            else:
+                if not args.image:
+                    raise ValueError("差し替える画像を指定してください。")
+                result = run_replace(args.device, args.card_id, assets, args.image)
     except Exception as error:
         result = {"ok": False, "error": str(error)}
     print(json.dumps(result, ensure_ascii=False))

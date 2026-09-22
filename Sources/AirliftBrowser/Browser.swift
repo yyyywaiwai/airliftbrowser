@@ -67,6 +67,7 @@ private struct CardEditResult: Decodable, Sendable {
     let thumbnailPath: String?
     let walletRestarted: Bool?
     let cacheCleared: Bool?
+    let fileExtension: String?
 }
 
 private struct CardListResult: Decodable, Sendable {
@@ -410,12 +411,14 @@ private func editCard(_ deviceID: String, arguments: [String]) async throws -> C
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let errorData = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        let exporting = arguments.contains("--export")
         guard let result = try? JSONDecoder().decode(CardEditResult.self, from: data) else {
             let detail = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            let failed = exporting ? "元の券面を保存できませんでした。" : "券面を書き換えられませんでした。"
             throw BridgeError(message: detail?.isEmpty == false
-                ? "券面を書き換えられませんでした。\n\(detail!.prefix(240))"
-                : "券面を書き換えられませんでした。")
+                ? "\(failed)\n\(detail!.prefix(240))"
+                : failed)
         }
         guard process.terminationStatus == 0, result.ok else {
             throw BridgeError(message: result.error ?? "券面の書き換えまたは復元に失敗しました。")
@@ -867,6 +870,35 @@ final class Browser {
                 ? "元の券面を戻し、Walletを再起動しました。"
                 : "元の券面を戻しました。Walletを開き直すと反映されます。"
         }
+    }
+
+    func saveOriginalCard(_ card: PayCard) {
+        guard let deviceID else { return }
+        perform("元の券面をMacに保存") {
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let result = try await editCard(deviceID, arguments: ["--card-id=\(card.id)", "--export", temp.path])
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = self.originalCardFileName(card, extension: result.fileExtension ?? "bin")
+            panel.canCreateDirectories = true
+            panel.message = "元の画像ボタンと同じ券面を、このMacへ保存します。"
+            guard await panel.begin() == .OK, let url = panel.url else {
+                self.status = "保存をキャンセルしました"
+                return
+            }
+            try Data(contentsOf: temp).write(to: url, options: .atomic)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    private func originalCardFileName(_ card: PayCard, extension ext: String) -> String {
+        let allowed = ["png", "pdf", "jpg", "heic", "bin"]
+        let suffix = allowed.contains(ext) ? ext : "bin"
+        let banned = CharacterSet(charactersIn: "/:\\?%*|\"<>").union(.newlines).union(.controlCharacters)
+        let stem = card.title.components(separatedBy: banned).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = stem.isEmpty ? "card" : String(stem.prefix(60))
+        return "\(base).\(suffix)"
     }
 
     private func applyCardPreview(_ cardID: String, _ result: CardEditResult) {

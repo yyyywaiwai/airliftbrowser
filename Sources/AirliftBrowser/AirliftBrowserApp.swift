@@ -398,6 +398,8 @@ private struct BrowserView: View {
                                     Button("元の画像") { restoringCard = card }
                                 }
                                 .disabled(card.assets.isEmpty || browser.busy)
+                                Button("Macに保存") { browser.saveOriginalCard(card) }
+                                    .disabled(browser.busy)
                             }
                             .padding(12)
                             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
