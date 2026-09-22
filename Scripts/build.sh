@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+swift build -c release
+APP="$PWD/dist/Airlift Browser.app"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/"{MacOS,Helpers,Resources}
+cp "$(swift build -c release --show-bin-path)/AirliftBrowser" "$APP/Contents/MacOS/AirliftBrowser"
+xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
+  -framework Foundation -framework CoreFoundation \
+  /System/Library/PrivateFrameworks/MobileDevice.framework/MobileDevice \
+  Sources/BrowserBridge/main.m -o "$APP/Contents/Helpers/browser_bridge"
+mkdir -p .build/poc "$APP/Contents/Resources/AirliftPoC/Sources"
+mkdir -p "$APP/Contents/Resources/DeviceFiles"
+sed 's/if (!\[summary\[@"productType"\] hasPrefix:@"iPhone"\]) return NO;/if (!([summary[@"productType"] hasPrefix:@"iPhone"] || [summary[@"productType"] hasPrefix:@"iPad"])) return NO;/' \
+  airlift/Sources/device_helper.m > .build/poc/device_helper.m
+xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
+  -I airlift/Sources -framework Foundation -framework CoreFoundation \
+  /System/Library/PrivateFrameworks/MobileDevice.framework/MobileDevice \
+  .build/poc/device_helper.m -o "$APP/Contents/Helpers/poc_device_helper"
+sed 's/argc < 6/argc < 4/' airlift/Sources/airtraffic_host.m > .build/poc/airtraffic_host.m
+xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
+  -framework Foundation -framework CoreFoundation \
+  /System/Library/PrivateFrameworks/AirTrafficHost.framework/AirTrafficHost \
+  .build/poc/airtraffic_host.m -o "$APP/Contents/Helpers/airtraffic_host"
+cp airlift/airlift.py Sources/PoC/runner.py Sources/PoC/write_file.py Sources/PoC/delete_file.py "$APP/Contents/Resources/AirliftPoC/"
+cp Sources/DeviceFiles/container_files.py Sources/DeviceFiles/dvt_files.py "$APP/Contents/Resources/DeviceFiles/"
+cp airlift/Sources/airlift_target.h "$APP/Contents/Resources/AirliftPoC/Sources/"
+cp airlift/LICENSE "$APP/Contents/Resources/Airlift-LICENSE.txt"
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>Airlift Browser</string>
+<key>CFBundleDisplayName</key><string>Airlift Browser</string>
+<key>CFBundleIdentifier</key><string>local.airlift.browser</string>
+<key>CFBundleExecutable</key><string>AirliftBrowser</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+codesign --force --sign - "$APP/Contents/Helpers/browser_bridge"
+codesign --force --sign - "$APP/Contents/Helpers/poc_device_helper"
+codesign --force --sign - "$APP/Contents/Helpers/airtraffic_host"
+codesign --force --sign - "$APP"
+codesign --verify --strict "$APP"
+printf '\n%s\n' "$APP"
