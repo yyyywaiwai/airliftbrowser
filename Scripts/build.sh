@@ -12,6 +12,7 @@ xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
   Sources/BrowserBridge/main.m -o "$APP/Contents/Helpers/browser_bridge"
 mkdir -p .build/poc "$APP/Contents/Resources/AirliftPoC/Sources"
 mkdir -p "$APP/Contents/Resources/DeviceFiles"
+mkdir -p "$APP/Contents/Resources/AppManagement"
 sed 's/if (!\[summary\[@"productType"\] hasPrefix:@"iPhone"\]) return NO;/if (!([summary[@"productType"] hasPrefix:@"iPhone"] || [summary[@"productType"] hasPrefix:@"iPad"])) return NO;/' \
   airlift/Sources/device_helper.m > .build/poc/device_helper.m
 xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
@@ -66,6 +67,7 @@ xcrun clang -fobjc-arc -O2 -Wall -Wextra -mmacosx-version-min=14.0 \
   Sources/PoC/mask_image.m -o "$APP/Contents/Helpers/mask_image"
 cp airlift/airlift.py Sources/PoC/runner.py Sources/PoC/write_file.py Sources/PoC/delete_file.py Sources/PoC/list_cards.py Sources/PoC/edit_card.py "$APP/Contents/Resources/AirliftPoC/"
 cp Sources/DeviceFiles/container_files.py Sources/DeviceFiles/dvt_files.py "$APP/Contents/Resources/DeviceFiles/"
+cp Sources/AppManagement/*.py "$APP/Contents/Resources/AppManagement/"
 cp airlift/Sources/airlift_target.h "$APP/Contents/Resources/AirliftPoC/Sources/"
 cp airlift/LICENSE "$APP/Contents/Resources/Airlift-LICENSE.txt"
 ICON_OUT="$PWD/.build/icon"
@@ -98,6 +100,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 <key>CFBundleIconFile</key><string>AirliftBrowser</string>
 <key>CFBundleIconName</key><string>AirliftBrowser</string>
+<key>UTExportedTypeDeclarations</key><array><dict>
+<key>UTTypeIdentifier</key><string>local.airlift.app-backup</string>
+<key>UTTypeDescription</key><string>Airlift App Backup</string>
+<key>UTTypeConformsTo</key><array><string>com.apple.package</string><string>public.directory</string></array>
+<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>airliftbackup</string></array></dict>
+</dict></array>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP/Contents/Helpers/browser_bridge"

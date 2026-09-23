@@ -23,6 +23,8 @@ private struct LocationRowButtonStyle: ButtonStyle {
 
 private struct BrowserView: View {
     @State private var browser = Browser()
+    @State private var appManager = AppManager()
+    @State private var appSection = "apps"
     @State private var search = ""
     @State private var pathDraft = "/"
     @State private var naming: NameRequest?
@@ -79,23 +81,29 @@ private struct BrowserView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("場所").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    locationButton("端末ファイル", icon: "internaldrive", selected: browser.scope == .system && browser.path != "/var/tmp") {
-                        browser.showSystem()
+                    locationButton("アプリ", icon: "square.grid.2x2", selected: appSection == "apps") {
+                        appSection = "apps"
                     }
-                    locationButton("一時ファイル", icon: "clock.arrow.circlepath", selected: browser.scope == .system && browser.path == "/var/tmp") {
+                    locationButton("バックアップ", icon: "archivebox", selected: appSection == "backups") {
+                        appSection = "backups"
+                    }
+                    locationButton("一時ファイル", icon: "clock.arrow.circlepath", selected: appSection == "legacy" && browser.scope == .system && browser.path == "/var/tmp") {
+                        appSection = "legacy"
                         browser.showSystem("/var/tmp")
                     }
-                    locationButton("Media", icon: "externaldrive", selected: browser.scope == .media) {
+                    locationButton("Media", icon: "externaldrive", selected: appSection == "legacy" && browser.scope == .media) {
+                        appSection = "legacy"
                         browser.showMedia()
                     }
-                    locationButton("Apple Pay", icon: "creditcard", selected: browser.scope == .cards) {
+                    locationButton("Apple Pay", icon: "creditcard", selected: appSection == "legacy" && browser.scope == .cards) {
+                        appSection = "legacy"
                         browser.showCards()
                     }
                 }.padding(.horizontal, 12).padding(.bottom, 8)
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(browser.scope == .system ? "実機ファイルブラウザ" : "Media領域",
+                    Label(appSection != "legacy" ? "アプリのコンテナ管理" : browser.scope == .system ? "実機ファイルブラウザ" : "Media領域",
                           systemImage: browser.scope == .system ? "folder.badge.gearshape" : "externaldrive")
-                    Text(browser.scope == .system
+                    Text(appSection != "legacy" ? "アプリのデータ・App Group・本体を閲覧し、Macにバックアップします。" : browser.scope == .system
                          ? "DVT / CoreDeviceで実項目を階層表示します。現在地へAirlift書込みできます。"
                          : "AFCで公開されるMediaを直接操作します。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -119,8 +127,12 @@ private struct BrowserView: View {
                 .padding(.bottom, 12)
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
-            .disabled(browser.blocksNewWork)
+            .disabled(browser.blocksNewWork || appManager.busy || appManager.editor?.isDirty == true)
         } detail: {
+            if appSection != "legacy" {
+                AppWorkspaceView(manager: appManager, deviceID: browser.deviceID, library: appSection == "backups")
+                    .disabled(browser.blocksNewWork)
+            } else {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Button("戻る", systemImage: "chevron.left") { browser.goBack() }
@@ -136,14 +148,10 @@ private struct BrowserView: View {
                             .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if browser.scope == .system {
-                        TextField("絶対パスを貼り付け", text: $pathDraft)
-                            .textFieldStyle(.roundedBorder)
+                        Text(browser.path)
                             .font(.system(.callout, design: .monospaced))
-                            .frame(maxWidth: .infinity)
-                            .onSubmit { browser.openPastedPath(pathDraft) }
-                        Button("移動") { browser.openPastedPath(pathDraft) }
-                            .disabled(browser.deviceID == nil
-                                      || pathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text(browser.path)
                             .font(.system(.callout, design: .monospaced))
@@ -321,8 +329,9 @@ private struct BrowserView: View {
                     }
                 }
             }
+            }
         }
-        .frame(minWidth: 800, minHeight: 480)
+        .frame(minWidth: 1040, minHeight: 600)
         .task { browser.scan() }
         .onChange(of: browser.path) {
             search = ""
