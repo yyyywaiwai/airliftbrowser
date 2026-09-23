@@ -64,7 +64,10 @@ class TimedAFC:
 
     def __getattr__(self, name):
         async def operation(*args, **kwargs):
-            return await asyncio.wait_for(getattr(self.service, name)(*args, **kwargs), 120)
+            try:
+                return await asyncio.wait_for(getattr(self.service, name)(*args, **kwargs), 120)
+            except asyncio.TimeoutError as error:
+                raise RuntimeError(f"端末の応答が120秒間ありません: {name} {args[0] if args else ''}。再接続後に未完了操作を復旧してください。") from error
         return operation
 
 
@@ -114,13 +117,32 @@ async def remote_child(afc, root, rel, leaf_link=False):
     return cursor
 
 
-async def remove_tree(afc, path):
+async def remove_tree(afc, path, reporter=None):
     # AFC rm implementations can follow links: explicitly lstat and unlink instead.
-    if (await afc.stat(path))["st_ifmt"] == "S_IFDIR":
-        for name in await afc.listdir(path):
-            relative(name)
-            await remove_tree(afc, posixpath.join(path, name))
-    await afc.rm_single(path)
+    # Iterative postorder also handles deeply nested deleted directories.
+    pending = [(path, False)]
+    removed = 0
+    deadline = asyncio.get_running_loop().time() + 1800
+    while pending:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise RuntimeError("一時データの削除が30分以内に完了しませんでした。再接続後に未完了操作を復旧してください。")
+        current, visited = pending.pop()
+        if reporter:
+            reporter.progress(f"一時データを削除中: {removed} 項目完了 · {current}",
+                              phase="cleanup", cancellable=False)
+        if not visited and (await afc.stat(current))["st_ifmt"] == "S_IFDIR":
+            pending.append((current, True))
+            for name in await afc.listdir(current):
+                relative(name)
+                if not name or "/" in name:
+                    raise ValueError("端末のファイル名が不正です。")
+                pending.append((posixpath.join(current, name), False))
+        else:
+            await afc.rm_single(current)
+            removed += 1
+    if reporter:
+        reporter.progress(f"一時データの削除完了: {removed} 項目 · {path}",
+                          force=True, phase="cleanup", cancellable=False)
 
 
 def root_fingerprint(info):
@@ -454,13 +476,16 @@ class Lease:
         for suffix in ("undo", "new"):
             path = "/" + self.state["source"] + "/" + suffix
             if await self.afc.exists(path):
-                await remove_tree(self.afc, path)
+                await remove_tree(self.afc, path, self.reporter)
         if self.state.get("copiedSource") and await self.afc.exists(self.root):
-            await remove_tree(self.afc, self.root)
+            await remove_tree(self.afc, self.root, self.reporter)
+        self.reporter.progress("一時リンクの削除・Books状態の復旧（最大120秒）", force=True,
+                               phase="cleanup", cancellable=False)
         result = await run_json([BRIDGE, "finish-delete", self.device, self.state["source"],
                                  self.state["link"], self.state["recovered"], self.work / "books", "cleanup"])
         if result.get("exitCode") or not result.get("ok"):
-            raise RuntimeError("一時データ・Books状態の復元が未完了です: " + str(self.work))
+            raise RuntimeError("一時データ・Books状態の復元が未完了です: " +
+                               str(result.get("error", result)) + "。復旧記録: " + str(self.work))
         self.save("complete")
         shutil.rmtree(self.work)
         if self.step_prefix:

@@ -56,6 +56,7 @@ struct AppFilesView: View {
                     }
                 }
                 .disabled(manager.busy || manager.editor?.isDirty == true)
+                .overlay(AppFinderDragMonitor(manager: manager, files: manager.visibleFiles))
                 .overlay {
                     if manager.visibleFiles.isEmpty && !manager.busy {
                         ContentUnavailableView(manager.fileListingError != nil ? "一覧を取得できませんでした" : manager.fileSearch.isEmpty ? "項目はありません" : "一致する項目はありません",

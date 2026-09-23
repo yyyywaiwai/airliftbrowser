@@ -94,6 +94,28 @@ class LocalAFC:
 
 
 class Acceptance(unittest.TestCase):
+    def test_cleanup_reports_progress_without_following_links_or_honoring_cancel(self):
+        async def run():
+            afc = LocalAFC(self.root)
+            outside = self.root / "original"
+            outside.mkdir()
+            (outside / "keep.txt").write_text("keep")
+            temporary = self.root / "undo"
+            (temporary / "nested").mkdir(parents=True)
+            (temporary / "nested/deleted.txt").write_text("delete")
+            (temporary / "link").symlink_to(outside, target_is_directory=True)
+            cancel = self.root / "cancel"
+            cancel.touch()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                await transport.remove_tree(afc, "/undo", common.Reporter(cancel))
+            self.assertFalse(temporary.exists())
+            self.assertEqual((outside / "keep.txt").read_text(), "keep")
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual(events[-1]["phase"], "cleanup")
+            self.assertIn("4 項目", events[-1]["message"])
+        asyncio.run(run())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=SANDBOX.name)
         self.root = Path(self.temp.name)

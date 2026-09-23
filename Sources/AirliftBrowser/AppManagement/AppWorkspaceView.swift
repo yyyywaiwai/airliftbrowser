@@ -97,6 +97,9 @@ struct AppWorkspaceView: View {
                 }
                 Text(manager.status).lineLimit(2)
                 Spacer()
+                Button("ログを表示") { manager.showOperation = true }
+                    .controlSize(.small)
+                    .disabled(manager.operation == nil)
                 if manager.busy { Button("中止", action: manager.cancel).controlSize(.small) }
                 else { Text(library ? "Mac上のバックアップ" : "USB · アプリ単位").foregroundStyle(.tertiary) }
             }.font(.caption).foregroundStyle(.secondary).padding(12)
@@ -126,14 +129,14 @@ struct AppWorkspaceView: View {
         }
         .task(id: "\(deviceID ?? "offline")-\(library)") { manager.activate(device: deviceID, library: library) }
         .sheet(isPresented: Binding(
-            get: { showBackup || restoreSource != nil || manager.operation != nil },
-            set: { if !$0 && !manager.busy { showBackup = false; restoreSource = nil; manager.operation = nil } }
+            get: { showBackup || restoreSource != nil || manager.showOperation },
+            set: { if !$0 { showBackup = false; restoreSource = nil; manager.showOperation = false } }
         )) {
-            if let operation = manager.operation {
+            if manager.showOperation, let operation = manager.operation {
                 AppOperationView(operation: operation, cancel: manager.cancel) {
                     showBackup = false
                     restoreSource = nil
-                    manager.operation = nil
+                    manager.showOperation = false
                 }
                 .frame(width: max(760, (NSApp.mainWindow?.contentLayoutRect.width ?? 960) - 40),
                        height: max(480, (NSApp.mainWindow?.contentLayoutRect.height ?? 690) - 40))

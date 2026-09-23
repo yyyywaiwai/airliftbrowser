@@ -103,9 +103,9 @@ struct AppOperationView: View {
                 Spacer()
                 if operation.running {
                     Button("中止", role: .destructive, action: cancel).disabled(operation.cancelling)
-                } else {
-                    Button("閉じる", action: close).keyboardShortcut(.defaultAction)
                 }
+                Button(operation.running ? "バックグラウンドで続行" : "閉じる", action: close)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(28)

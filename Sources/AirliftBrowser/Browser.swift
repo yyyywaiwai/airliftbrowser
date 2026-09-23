@@ -146,7 +146,7 @@ private struct ExportRequest: Sendable {
     let entry: Entry
 }
 
-private struct StagedDrop: Sendable {
+struct StagedDrop: Sendable {
     let root: URL
     let files: [URL]
 }
@@ -263,7 +263,7 @@ private func stageDropped(_ providers: [NSItemProvider]) async throws -> StagedD
     }
 }
 
-private func stageDroppedURLs(_ urls: [URL]) throws -> StagedDrop {
+func stageDroppedURLs(_ urls: [URL]) throws -> StagedDrop {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("airlift-import-\(UUID().uuidString)", isDirectory: true)
     do {
@@ -1309,10 +1309,11 @@ struct FinderDragMonitor: NSViewRepresentable {
 
 final class FinderDragMonitorView: NSView, NSDraggingSource {
     var browser: Browser?
+    var appManager: AppManager?
     var entries: [Entry] = []
     private var passingThrough = false
     private var anchorRow: Int?
-    private var kept: [FinderFilePromise] = []
+    private var kept: [NSObject] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1334,10 +1335,17 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
         }
         if event.clickCount >= 2 {
             MainActor.assumeIsolated {
-                guard let browser, entries.indices.contains(row) else { return }
+                guard entries.indices.contains(row) else { return }
                 let entry = entries[row]
-                browser.selection = [entry.id]
-                if entry.isDirectory { browser.navigate(entry.id) }
+                if let appManager {
+                    guard appManager.canTransferFiles,
+                          let file = appManager.files.first(where: { $0.id == entry.id }) else { return }
+                    appManager.selection = [entry.id]
+                    appManager.openFile(file)
+                } else if let browser {
+                    browser.selection = [entry.id]
+                    if entry.isDirectory { browser.navigate(entry.id) }
+                }
             }
             return
         }
@@ -1367,7 +1375,9 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        FinderDragGate.active ? [] : .copy
+        if FinderDragGate.active { return [] }
+        if let appManager, !appManager.canReceiveFiles { return [] }
+        return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -1380,8 +1390,11 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL], !urls.isEmpty else { return false }
-        MainActor.assumeIsolated { browser?.importDroppedURLs(urls) }
-        return true
+        return MainActor.assumeIsolated {
+            if let appManager { return appManager.importDroppedURLs(urls) }
+            browser?.importDroppedURLs(urls)
+            return browser != nil
+        }
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
@@ -1389,6 +1402,7 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        FinderDragGate.active = false
         let finished = kept
         kept = []
         DispatchQueue.main.async { _ = finished }
@@ -1401,22 +1415,47 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
     }
 
     private func applyClick(row: Int, flags: NSEvent.ModifierFlags) {
-        guard let browser, entries.indices.contains(row) else { return }
+        guard entries.indices.contains(row) else { return }
+        if let appManager, !appManager.canTransferFiles { return }
         let id = entries[row].id
+        var selection = appManager?.selection ?? browser?.selection ?? []
         if flags.contains(.shift), let anchorRow, entries.indices.contains(anchorRow) {
             let bounds = min(anchorRow, row)...max(anchorRow, row)
-            browser.selection = Set(bounds.map { entries[$0].id })
+            selection = Set(bounds.map { entries[$0].id })
         } else if flags.contains(.command) {
-            if browser.selection.contains(id) { browser.selection.remove(id) }
-            else { browser.selection.insert(id) }
+            if selection.contains(id) { selection.remove(id) }
+            else { selection.insert(id) }
             anchorRow = row
         } else {
-            browser.selection = [id]
+            selection = [id]
             anchorRow = row
         }
+        if let appManager { appManager.selection = selection }
+        else { browser?.selection = selection }
     }
 
     private func startDrag(row: Int, event: NSEvent) {
+        if let appManager {
+            guard entries.indices.contains(row) else { return }
+            let promises = appManager.finderPromises(for: entries[row].id)
+            guard !promises.isEmpty else { return }
+            let anchor = convert(event.locationInWindow, from: nil)
+            let items = promises.enumerated().map { index, promise in
+                let provider = FinderPromiseProvider(
+                    fileType: promise.isDirectory ? UTType.folder.identifier : UTType.data.identifier,
+                    retaining: promise)
+                let item = NSDraggingItem(pasteboardWriter: provider)
+                item.setDraggingFrame(NSRect(x: anchor.x + CGFloat(index) * 8 - 16,
+                                             y: anchor.y - CGFloat(index) * 4 - 16, width: 32, height: 32),
+                                      contents: NSImage(systemSymbolName: promise.isDirectory ? "folder.fill" : "doc",
+                                                        accessibilityDescription: promise.fileName))
+                return item
+            }
+            kept = promises
+            FinderDragGate.active = true
+            beginDraggingSession(with: items, event: event, source: self).draggingFormation = .pile
+            return
+        }
         MainActor.assumeIsolated {
             guard let browser, entries.indices.contains(row) else { return }
             let entry = entries[row]
@@ -1430,7 +1469,7 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
             for (index, request) in requests.enumerated() {
                 let promise = FinderFilePromise(request: request, handoff: handoff)
                 let type = request.entry.isDirectory ? UTType.folder.identifier : UTType.data.identifier
-                let provider = NSFilePromiseProvider(fileType: type, delegate: promise)
+                let provider = FinderPromiseProvider(fileType: type, retaining: promise)
                 let item = NSDraggingItem(pasteboardWriter: provider)
                 let frame = NSRect(
                     x: anchor.x + CGFloat(index) * 8 - 16,
@@ -1443,14 +1482,13 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
             }
             kept = promises
             FinderDragGate.active = true
-            defer { FinderDragGate.active = false }
             let session = beginDraggingSession(with: items, event: event, source: self)
             session.draggingFormation = .pile
         }
     }
 
-    private func row(at windowPoint: NSPoint) -> Int? {
-        guard let table = fileTable() else { return nil }
+    func row(at windowPoint: NSPoint) -> Int? {
+        guard let table = fileTable(at: windowPoint) else { return nil }
         let local = table.convert(windowPoint, from: nil)
         guard table.bounds.contains(local) else { return nil }
         let index = table.row(at: local)
@@ -1458,19 +1496,26 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
         return index
     }
 
-    private func fileTable() -> NSTableView? {
+    private func fileTable(at windowPoint: NSPoint) -> NSTableView? {
         var view: NSView? = superview
         while let current = view {
-            if let table = FinderDragMonitorView.firstTable(in: current, skipping: self) { return table }
+            if let table = FinderDragMonitorView.table(at: windowPoint, in: current, skipping: self) { return table }
             view = current.superview
         }
         return nil
     }
 
-    private static func firstTable(in view: NSView, skipping skipped: NSView) -> NSTableView? {
-        if let table = view as? NSTableView { return table }
+    private static func table(at windowPoint: NSPoint, in view: NSView, skipping skipped: NSView) -> NSTableView? {
+        guard !view.isHidden else { return nil }
+        // SwiftUI can host the sidebar List and the file Table under the same
+        // AppKit ancestor. The first NSTableView may therefore be the sidebar.
+        // Resolve the table under the pointer, including its scroll clipping.
+        if let table = view as? NSTableView {
+            let point = table.convert(windowPoint, from: nil)
+            if table.bounds.contains(point) && table.visibleRect.contains(point) { return table }
+        }
         for child in view.subviews where child !== skipped && !child.isDescendant(of: skipped) {
-            if let found = firstTable(in: child, skipping: skipped) { return found }
+            if let found = table(at: windowPoint, in: child, skipping: skipped) { return found }
         }
         return nil
     }
@@ -1498,7 +1543,7 @@ private func writeFinderExport(_ request: ExportRequest, to destination: URL) as
     }
 }
 
-private actor FinderExportQueue {
+actor FinderExportQueue {
     private var last: Task<Void, Never>?
 
     func run(_ body: @escaping @Sendable () async throws -> Void) async throws {
@@ -1512,9 +1557,9 @@ private actor FinderExportQueue {
     }
 }
 
-private let finderExportQueue = FinderExportQueue()
+let finderExportQueue = FinderExportQueue()
 
-private let finderPromiseQueue: OperationQueue = {
+let finderPromiseQueue: OperationQueue = {
     let queue = OperationQueue()
     queue.name = "AirliftFinderPromise"
     queue.maxConcurrentOperationCount = 1

@@ -27,12 +27,16 @@ final class AppManager {
     var iconURL: URL?
     var fileListingError: String?
     var operation: AppOperation?
+    var showOperation = false
     var verificationEnabled = UserDefaults.standard.object(forKey: "appTransferVerification") as? Bool ?? true {
         didSet { UserDefaults.standard.set(verificationEnabled, forKey: "appTransferVerification") }
     }
     private var cancellationURL: URL?
     private var workspaces: [URL] = []
     private var nextActivation: (device: String?, library: Bool)?
+    private var finderExportID: UUID?
+    private var finderExportRemaining = 0
+    private var finderExportFailures: [String] = []
 
     var app: ManagedApp? { apps.first { $0.id == appID } }
     var backup: AppBackup? { backups.first { $0.id == backupID } }
@@ -55,6 +59,91 @@ final class AppManager {
     var selectedFile: AppFile? { selection.count == 1 ? files.first { selection.contains($0.id) } : nil }
     var canBrowse: Bool { libraryMode ? backup != nil : app != nil && deviceID != nil }
     var canEdit: Bool { libraryMode || currentRegion?.kind != "bundle" }
+    var canTransferFiles: Bool { !busy && canBrowse && currentRegion != nil && editor?.isDirty != true }
+    var canReceiveFiles: Bool { canTransferFiles && canEdit && fileListingError == nil }
+
+    func finderPromises(for id: String) -> [AppFinderFilePromise] {
+        guard canTransferFiles else { return [] }
+        if !selection.contains(id) { selection = [id] }
+        let files = visibleFiles.filter { selection.contains($0.id) && ($0.isDirectory || $0.kind == "file") }
+        let exportID = UUID()
+        let appName = title
+        let cancelURL = FileManager.default.temporaryDirectory.appendingPathComponent("airlift-cancel-\(exportID.uuidString)")
+        return files.map { file in
+            var request = context("get", relative: file.id)
+            request.cancelPath = cancelURL.path
+            return AppFinderFilePromise(file: file, request: request) { [weak self] event in
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateFinderExport(event, id: exportID, count: files.count, appName: appName, cancelURL: cancelURL)
+                }
+            }
+        }
+    }
+
+    func updateFinderExport(_ event: AppFinderExportEvent, id: UUID, count: Int, appName: String, cancelURL: URL) {
+        switch event {
+        case .started(let name):
+            if finderExportID == nil {
+                finderExportID = id
+                finderExportRemaining = count
+                finderExportFailures = []
+                busy = true
+                fraction = nil
+                cancellationURL = cancelURL
+                operation = AppOperation(title: "Finderへコピー（\(count) 項目）", appName: appName)
+                showOperation = false
+            }
+            guard finderExportID == id else { return }
+            status = "Finderへコピー中: \(name)"
+            operation?.message = status
+            operation?.append(status)
+        case .progress(let response):
+            guard finderExportID == id else { return }
+            updateProgress(response)
+        case .finished(let name, let failure):
+            guard finderExportID == id else { return }
+            if let failure { finderExportFailures.append("\(name): \(failure)") }
+            operation?.append(failure.map { "コピー失敗: \(name) — \($0)" } ?? "コピー完了: \(name)")
+            finderExportRemaining -= 1
+            guard finderExportRemaining == 0 else {
+                fraction = nil
+                status = "Finderへコピー中（残り \(finderExportRemaining) 項目）"
+                return
+            }
+            let failed = !finderExportFailures.isEmpty
+            status = failed ? "Finderへのコピーが完了しませんでした" : "Finderへのコピーが完了しました"
+            operation?.finish(status, failed: failed)
+            if failed { error = finderExportFailures.joined(separator: "\n") }
+            finderExportID = nil
+            finishWork()
+        }
+    }
+
+    @discardableResult
+    func importDroppedURLs(_ urls: [URL]) -> Bool {
+        guard canReceiveFiles, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
+        perform("ファイルを受信") {
+            let staged = try stageDroppedURLs(urls)
+            defer { try? FileManager.default.removeItem(at: staged.root) }
+            var failures: [String] = []
+            for url in staged.files {
+                do {
+                    // Build each request after the previous mutation: backup edits
+                    // create a new revision, which becomes the next upload's target.
+                    var request = self.context("mutate", relative: self.join(url.lastPathComponent))
+                    request.operation = "upload"
+                    request.local = url.path
+                    request.overwrite = false
+                    try await self.applyMutation(request)
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty { throw AppServiceError(failures.joined(separator: "\n")) }
+            self.status = "\(staged.files.count) 項目を受信しました"
+        }
+        return true
+    }
 
     func activate(device: String?, library: Bool) {
         guard !busy else {
@@ -427,34 +516,37 @@ final class AppManager {
         busy = true
         fraction = nil
         status = message
-        if showSheet { self.operation = AppOperation(title: message, appName: appName ?? title) }
+        self.operation = AppOperation(title: message, appName: appName ?? title)
+        showOperation = showSheet
         cancellationURL = FileManager.default.temporaryDirectory.appendingPathComponent("airlift-cancel-\(UUID().uuidString)")
         Task {
-            defer {
-                busy = false
-                fraction = nil
-                if let cancellationURL { try? FileManager.default.removeItem(at: cancellationURL) }
-                cancellationURL = nil
-                if let next = nextActivation {
-                    nextActivation = nil
-                    activate(device: next.device, library: next.library)
-                }
-            }
+            defer { finishWork() }
             do {
                 try await operation()
-                if status == message || status.hasPrefix("コンテナ") || status.hasPrefix("取得:") || status.hasPrefix("照合:") {
+                if status == message || status.hasPrefix("コンテナ") || status.hasPrefix("取得:") || status.hasPrefix("照合:") || self.operation?.phase == "cleanup" {
                     status = "完了"
                 }
-                if showSheet { self.operation?.finish(self.status, failed: self.operation?.failed ?? false) }
+                self.operation?.finish(self.status, failed: self.operation?.failed ?? false)
             } catch {
-                if showSheet { self.operation?.finish(error.localizedDescription, failed: true) }
-                else { self.error = error.localizedDescription }
+                self.operation?.finish(error.localizedDescription, failed: true)
+                if !showOperation { self.error = error.localizedDescription }
                 status = "処理を完了できませんでした"
                 if let deviceID,
                    let result = try? await AppService.call(AppRequest(action: "pending", device: deviceID)) {
                     pending = result.pending ?? []
                 }
             }
+        }
+    }
+
+    private func finishWork() {
+        busy = false
+        fraction = nil
+        if let cancellationURL { try? FileManager.default.removeItem(at: cancellationURL) }
+        cancellationURL = nil
+        if let next = nextActivation {
+            nextActivation = nil
+            activate(device: next.device, library: next.library)
         }
     }
 }
