@@ -82,32 +82,22 @@ private struct BrowserView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("場所").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    locationButton("アプリ", icon: "square.grid.2x2", selected: appSection == "apps") {
+                    locationButton("アプリ", icon: "square.grid.2x2", hint: "アプリのコンテナ管理\nアプリのデータ・App Group・本体を閲覧し、Macにバックアップします。", selected: appSection == "apps") {
                         appSection = "apps"
                     }
-                    locationButton("バックアップ", icon: "archivebox", selected: appSection == "backups") {
+                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したアプリのバックアップを閲覧・編集し、端末へリストアできます。", selected: appSection == "backups") {
                         appSection = "backups"
                     }
-                    locationButton("一時ファイル", icon: "clock.arrow.circlepath", selected: appSection == "legacy" && browser.scope == .system && browser.path == "/var/tmp") {
-                        appSection = "legacy"
-                        browser.showSystem("/var/tmp")
-                    }
-                    locationButton("Media", icon: "externaldrive", selected: appSection == "legacy" && browser.scope == .media) {
+                    locationButton("Media", icon: "externaldrive", hint: "AFCで公開されるMedia領域のファイルを閲覧・操作します。", selected: appSection == "legacy" && browser.scope == .media) {
                         appSection = "legacy"
                         browser.showMedia()
                     }
-                    locationButton("Apple Pay", icon: "creditcard", selected: appSection == "legacy" && browser.scope == .cards) {
+                    locationButton("Apple Pay", icon: "creditcard", hint: "Walletのカード名・下4桁・券面画像を表示します。読み出したデータは端末へ戻します。", selected: appSection == "legacy" && browser.scope == .cards) {
                         appSection = "legacy"
                         browser.showCards()
                     }
                 }.padding(.horizontal, 12).padding(.bottom, 8)
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(appSection != "legacy" ? "アプリのコンテナ管理" : browser.scope == .system ? "実機ファイルブラウザ" : "Media領域",
-                          systemImage: browser.scope == .system ? "folder.badge.gearshape" : "externaldrive")
-                    Text(appSection != "legacy" ? "アプリのデータ・App Group・本体を閲覧し、Macにバックアップします。" : browser.scope == .system
-                         ? "DVT / CoreDeviceで実項目を階層表示します。現在地へAirlift書込みできます。"
-                         : "AFCで公開されるMediaを直接操作します。")
-                        .font(.caption).foregroundStyle(.secondary)
                     Button("USB端末を再検索", systemImage: "arrow.triangle.2.circlepath") { browser.scan() }
                         .padding(.top, 6)
                     Button("AirTraffic PoCを実行…", systemImage: "lock.open.trianglebadge.exclamationmark") {
@@ -454,17 +444,25 @@ private struct BrowserView: View {
         naming = NameRequest(entry: entry)
     }
 
-    private func locationButton(_ title: String, icon: String, selected: Bool,
+    private func locationButton(_ title: String, icon: String, hint: String, selected: Bool,
                                 action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8).padding(.vertical, 7)
-                .background(selected ? Color.accentColor.opacity(0.18) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7))
+        HStack(spacing: 8) {
+            Button(action: action) {
+                Label(title, systemImage: icon)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 7)
+            }
+            .buttonStyle(LocationRowButtonStyle())
+            .disabled(browser.deviceID == nil || browser.blocksNewWork)
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .help(hint)
+                .accessibilityLabel("\(title)の説明")
+                .accessibilityValue(hint)
         }
-        .buttonStyle(LocationRowButtonStyle())
-        .disabled(browser.deviceID == nil || browser.blocksNewWork)
+        .padding(.horizontal, 8)
+        .background(selected ? Color.accentColor.opacity(0.18) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
     }
 }
 

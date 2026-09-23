@@ -24,7 +24,6 @@ final class AppManager {
     var error: String?
     var warnings: [String] = []
     var editor: AppEditorDocument?
-    var iconURL: URL?
     var fileListingError: String?
     var operation: AppOperation?
     var showOperation = false
@@ -178,12 +177,6 @@ final class AppManager {
         guard app != nil else { return }
         perform("コンテナを開く") {
             try await self.loadFiles()
-            if let device = self.deviceID, let app = self.app, app.identity == "installed" {
-                let url = try self.workspace().appendingPathComponent("icon.png")
-                if let result = try? await self.call(AppRequest(action: "icon", device: device, appID: app.id, local: url.path)), result.local != nil {
-                    self.iconURL = url
-                }
-            }
         }
     }
 
@@ -479,7 +472,7 @@ final class AppManager {
     private func join(_ leaf: String) -> String { relativePath.isEmpty ? leaf : relativePath + "/" + leaf }
 
     private func resetFiles() {
-        files = []; selection = []; relativePath = ""; regionID = nil; fileSearch = ""; iconURL = nil; fileListingError = nil
+        files = []; selection = []; relativePath = ""; regionID = nil; fileSearch = ""; fileListingError = nil
         closeEditor()
     }
 

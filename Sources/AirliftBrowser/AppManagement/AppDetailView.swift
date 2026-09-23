@@ -8,9 +8,8 @@ struct AppDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                if let url = manager.iconURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFit().frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                if !manager.libraryMode, let app = manager.app {
+                    ManagedAppIcon(app: app, deviceID: manager.deviceID, size: 44)
                 } else {
                     Image(systemName: manager.libraryMode ? "archivebox" : "app.fill")
                         .font(.largeTitle).foregroundStyle(.tint).frame(width: 44, height: 44)

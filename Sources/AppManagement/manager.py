@@ -443,8 +443,6 @@ async def dispatch(request, reporter):
         return result
     if action == "recover":
         return await transport.recover(request["device"], reporter)
-    if transport.pending(request["device"]):
-        raise ValueError("この端末には未完了の操作があります。先に『未完了操作を復旧』を実行してください。")
     if action == "icon":
         from pymobiledevice3.lockdown import create_using_usbmux
         from pymobiledevice3.services.springboard import SpringBoardServicesService
@@ -453,6 +451,8 @@ async def dispatch(request, reporter):
                 data = await service.get_icon_pngdata(request["appID"])
         Path(request["local"]).write_bytes(data)
         return {"local": request["local"]}
+    if transport.pending(request["device"]):
+        raise ValueError("この端末には未完了の操作があります。先に『未完了操作を復旧』を実行してください。")
     if action == "backup":
         return await backup(request, reporter)
     if action == "restore":
@@ -483,7 +483,9 @@ def main():
     HOME.mkdir(parents=True, exist_ok=True)
     with (HOME / "manager.lock").open("a") as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # SpringBoard icons are read-only and do not use container leases.
+            if request["action"] != "icon":
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = asyncio.run(dispatch(request, reporter))
             print(json.dumps({"event": "result", "ok": True, **result}, ensure_ascii=False), flush=True)
             return 0

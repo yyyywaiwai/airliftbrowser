@@ -56,7 +56,7 @@ struct AppWorkspaceView: View {
                     } else {
                         List(selection: $manager.appID) {
                             ForEach(manager.visibleApps) { app in
-                                ManagedAppRow(app: app).tag(app.id)
+                                ManagedAppRow(app: app, deviceID: deviceID).tag(app.id)
                             }
                         }
                         .onChange(of: manager.appID) { manager.selectApp(manager.appID) }

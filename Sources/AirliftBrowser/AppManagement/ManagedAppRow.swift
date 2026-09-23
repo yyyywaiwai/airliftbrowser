@@ -2,11 +2,11 @@ import SwiftUI
 
 struct ManagedAppRow: View {
     let app: ManagedApp
+    let deviceID: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: app.category == "orphan" ? "folder.badge.questionmark" : "app")
-                .font(.title2).foregroundStyle(.secondary).frame(width: 28)
+            ManagedAppIcon(app: app, deviceID: deviceID)
             VStack(alignment: .leading, spacing: 4) {
                 Text(app.name).lineLimit(2)
                 Text(app.bundleID.isEmpty ? "所属未識別" : app.bundleID)
