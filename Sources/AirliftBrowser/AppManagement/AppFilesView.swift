@@ -26,8 +26,8 @@ struct AppFilesView: View {
                 }
                 TextField("このフォルダを検索", text: $manager.fileSearch)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 180)
-            }.padding(12).disabled(manager.busy || manager.editor?.isDirty == true)
-            HSplitView {
+            }.padding(12).disabled(manager.busy)
+            Group {
                 Table(manager.visibleFiles, selection: $manager.selection) {
                     TableColumn("名前") { file in
                         Label(file.name, systemImage: file.symbol)
@@ -42,7 +42,9 @@ struct AppFilesView: View {
                 }
                 .contextMenu(forSelectionType: String.self) { ids in
                     if ids.count == 1, let id = ids.first, let file = manager.files.first(where: { $0.id == id }) {
-                        Button(file.isDirectory ? "開く" : "閲覧・編集") { manager.openFile(file) }
+                        if file.isDirectory {
+                            Button("フォルダを開く") { manager.navigate(file.id) }
+                        }
                         Button("Macに保存…") { manager.exportFile(file) }
                         Divider()
                         Button("名前を変更…") { renameFile = file; newName = file.name; showName = true }
@@ -51,11 +53,11 @@ struct AppFilesView: View {
                             .disabled(!manager.canEdit)
                     }
                 } primaryAction: { ids in
-                    if ids.count == 1, let id = ids.first, let file = manager.files.first(where: { $0.id == id }) {
-                        manager.openFile(file)
+                    if ids.count == 1, let id = ids.first, let file = manager.files.first(where: { $0.id == id }), file.isDirectory {
+                        manager.navigate(file.id)
                     }
                 }
-                .disabled(manager.busy || manager.editor?.isDirty == true)
+                .disabled(manager.busy)
                 .overlay(AppFinderDragMonitor(manager: manager, files: manager.visibleFiles))
                 .overlay {
                     if manager.visibleFiles.isEmpty && !manager.busy {
@@ -64,16 +66,13 @@ struct AppFilesView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                if manager.editor != nil {
-                    AppEditorView(manager: manager).frame(minWidth: 320, idealWidth: 420)
-                }
             }
             Divider()
             HStack {
-                Button("開く", systemImage: "doc.text.magnifyingglass") {
-                    if let file = manager.selectedFile { manager.openFile(file) }
+                Button("フォルダを開く", systemImage: "folder") {
+                    if let file = manager.selectedFile, file.isDirectory { manager.navigate(file.id) }
                 }
-                .disabled(manager.selectedFile == nil || manager.selectedFile?.kind == "link" || manager.selectedFile?.kind == "other")
+                .disabled(manager.selectedFile?.isDirectory != true)
                 Button("フォルダ作成", systemImage: "folder.badge.plus") {
                     renameFile = nil; newName = ""; showName = true
                 }.disabled(!manager.canEdit)
@@ -87,7 +86,7 @@ struct AppFilesView: View {
                 Spacer()
                 Text("\(manager.visibleFiles.count) 項目").font(.caption).foregroundStyle(.secondary)
             }.controlSize(.small).padding(12)
-                .disabled(manager.busy || manager.regionID == nil || manager.editor?.isDirty == true)
+                .disabled(manager.busy || manager.regionID == nil)
         }
         .sheet(isPresented: $showName) {
             VStack(alignment: .leading, spacing: 16) {

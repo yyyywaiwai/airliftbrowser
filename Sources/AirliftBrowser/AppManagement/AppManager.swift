@@ -23,7 +23,6 @@ final class AppManager {
     var fraction: Double?
     var error: String?
     var warnings: [String] = []
-    var editor: AppEditorDocument?
     var fileListingError: String?
     var operation: AppOperation?
     var showOperation = false
@@ -31,11 +30,22 @@ final class AppManager {
         didSet { UserDefaults.standard.set(verificationEnabled, forKey: "appTransferVerification") }
     }
     private var cancellationURL: URL?
-    private var workspaces: [URL] = []
     private var nextActivation: (device: String?, library: Bool)?
     private var finderExportID: UUID?
     private var finderExportRemaining = 0
     private var finderExportFailures: [String] = []
+    private var fileIndexes: [AppFileIndex.Key: AppFileIndex] = [:]
+    private let service: AppService.Handler
+
+    init(service: @escaping AppService.Handler = AppService.call) {
+        self.service = service
+    }
+
+    private var fileIndexKey: AppFileIndex.Key? {
+        guard !libraryMode, let deviceID, let appID, let currentRegion else { return nil }
+        return AppFileIndex.Key(device: deviceID, app: appID, region: currentRegion.id,
+                                containerPath: currentRegion.path)
+    }
 
     var app: ManagedApp? { apps.first { $0.id == appID } }
     var backup: AppBackup? { backups.first { $0.id == backupID } }
@@ -58,7 +68,7 @@ final class AppManager {
     var selectedFile: AppFile? { selection.count == 1 ? files.first { selection.contains($0.id) } : nil }
     var canBrowse: Bool { libraryMode ? backup != nil : app != nil && deviceID != nil }
     var canEdit: Bool { libraryMode || currentRegion?.kind != "bundle" }
-    var canTransferFiles: Bool { !busy && canBrowse && currentRegion != nil && editor?.isDirty != true }
+    var canTransferFiles: Bool { !busy && canBrowse && currentRegion != nil }
     var canReceiveFiles: Bool { canTransferFiles && canEdit && fileListingError == nil }
 
     func finderPromises(for id: String) -> [AppFinderFilePromise] {
@@ -70,6 +80,7 @@ final class AppManager {
         let cancelURL = FileManager.default.temporaryDirectory.appendingPathComponent("airlift-cancel-\(exportID.uuidString)")
         return files.map { file in
             var request = context("get", relative: file.id)
+            request.file = file
             request.cancelPath = cancelURL.path
             return AppFinderFilePromise(file: file, request: request) { [weak self] event in
                 DispatchQueue.main.async { [weak self] in
@@ -152,7 +163,7 @@ final class AppManager {
         let changed = deviceID != device || libraryMode != library
         deviceID = device
         libraryMode = library
-        if changed { resetFiles(); warnings = [] }
+        if changed { fileIndexes = [:]; resetFiles(); warnings = [] }
         if device == nil { apps = []; pending = [] }
         perform(library ? "バックアップを取得" : "アプリを取得") {
             try await self.loadBackups()
@@ -180,7 +191,7 @@ final class AppManager {
     }
 
     func showAppActions() {
-        guard !busy, editor?.isDirty != true else { return }
+        guard !busy else { return }
         resetFiles()
         status = "操作を選択してください"
     }
@@ -197,20 +208,20 @@ final class AppManager {
         guard !busy else { return }
         resetFiles()
         regionID = id
-        if id != nil { perform("領域を開く") { try await self.loadFiles() } }
+        if id != nil, !showCachedFiles() { perform("領域を開く") { try await self.loadFiles() } }
     }
 
     func navigate(_ path: String) {
         guard !busy else { return }
-        closeEditor()
         relativePath = path
         selection = []
         fileSearch = ""
-        perform("フォルダを開く") { try await self.loadFiles() }
+        if !showCachedFiles() { perform("フォルダを開く") { try await self.loadFiles() } }
     }
 
     func refresh() {
         guard !busy else { return }
+        if let key = fileIndexKey { fileIndexes.removeValue(forKey: key) }
         if canBrowse, currentRegion != nil { perform("一覧を更新") { try await self.loadFiles(); try await self.loadBackups() } }
         else { activate(device: deviceID, library: libraryMode) }
     }
@@ -270,7 +281,7 @@ final class AppManager {
     }
 
     func deleteBackup(_ backup: AppBackup) {
-        guard !busy, editor?.isDirty != true else { return }
+        guard !busy else { return }
         perform("バックアップをゴミ箱に移動") {
             let path = backup.path
             try await Task.detached {
@@ -319,6 +330,7 @@ final class AppManager {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         perform("Macに保存") {
             var request = self.context("get", relative: file.id)
+            request.file = file
             request.local = url.path
             _ = try await self.call(request)
         }
@@ -351,71 +363,6 @@ final class AppManager {
         }
     }
 
-    func openFile(_ file: AppFile) {
-        if file.isDirectory { navigate(file.id); return }
-        guard file.kind == "file", !busy else { return }
-        perform("ファイルを開く") {
-            self.closeEditor()
-            let local = try self.workspace().appendingPathComponent(file.name)
-            var request = self.context("get", relative: file.id)
-            request.local = local.path
-            let result = try await self.call(request)
-            var document = AppEditorDocument(file: file, localURL: local, originalHash: result.hash)
-            let ext = local.pathExtension.lowercased()
-            document.mode = ext == "plist" ? "plist" : ["png", "jpg", "jpeg", "heic", "gif", "pdf"].contains(ext) ? "preview" : "text"
-            self.editor = document
-            do { try await self.readEditor() }
-            catch {
-                self.editor?.mode = "hex"
-                try await self.readEditor()
-            }
-        }
-    }
-
-    func changeEditorMode(_ mode: String) {
-        guard !busy, editor?.isDirty != true else { return }
-        editor?.mode = mode
-        editor?.offset = 0
-        perform("内容を表示") { try await self.readEditor() }
-    }
-
-    func editorPage(_ delta: Int64) {
-        guard let editor, !editor.isDirty, !busy else { return }
-        self.editor?.offset = max(0, min(max(0, editor.size - 1) / 4096 * 4096, editor.offset + delta * 4096))
-        perform("内容を表示") { try await self.readEditor() }
-    }
-
-    func saveEditor() {
-        guard let document = editor, document.isDirty else { return }
-        perform("編集内容を保存") {
-            var write = AppRequest(action: "editor-write", local: document.localURL.path)
-            write.encoding = document.encoding
-            write.text = document.text
-            write.offset = document.offset
-            write.pageBytes = document.pageBytes
-            _ = try await self.call(write)
-            var request = self.context("mutate", relative: document.file.id)
-            request.operation = "upload"
-            request.local = document.localURL.path
-            request.overwrite = true
-            request.expectedHash = document.originalHash
-            let result = try await self.applyMutation(request)
-            var updated = document
-            updated.originalHash = result.hash
-            updated.savedText = document.text
-            self.editor = updated
-            try await self.readEditor()
-        }
-    }
-
-    func closeEditor() {
-        if let url = editor?.localURL.deletingLastPathComponent() {
-            try? FileManager.default.removeItem(at: url)
-            workspaces.removeAll { $0 == url }
-        }
-        editor = nil
-    }
-
     func cancel() {
         guard let cancellationURL else { return }
         do {
@@ -427,34 +374,45 @@ final class AppManager {
         catch { self.error = error.localizedDescription }
     }
 
-    private func readEditor() async throws {
-        guard let document = editor, document.mode != "preview" else { return }
-        let result = try await call(AppRequest(action: "editor-read", local: document.localURL.path,
-                                              mode: document.mode, offset: document.offset))
-        editor?.text = result.text ?? ""
-        editor?.savedText = result.text ?? ""
-        editor?.encoding = result.encoding ?? "utf-8"
-        editor?.size = result.size ?? 0
-        editor?.pageBytes = result.pageBytes ?? 0
-    }
-
-    @discardableResult
-    private func applyMutation(_ request: AppRequest) async throws -> AppResponse {
+    private func applyMutation(_ request: AppRequest) async throws {
         let result = try await call(request)
         if let saved = result.backup {
             try await loadBackups()
             backupID = saved.id
         }
         try await loadFiles()
-        return result
+    }
+
+    @discardableResult
+    private func showCachedFiles() -> Bool {
+        guard let key = fileIndexKey, let index = fileIndexes[key] else { return false }
+        if let entries = index.entries(at: relativePath) {
+            files = entries
+            fileListingError = nil
+            status = "\(files.count) 項目（取得済みの一覧・更新で再取得）"
+        } else {
+            files = []
+            fileListingError = "取得済みの一覧にこのフォルダがありません。親フォルダに戻るか、一覧を更新してください。"
+            status = "フォルダが見つかりません"
+        }
+        selection = selection.intersection(Set(files.map(\.id)))
+        return true
     }
 
     private func loadFiles() async throws {
         guard regionID != nil else { files = []; return }
+        if showCachedFiles() { return }
         fileListingError = nil
         do {
-            let result = try await call(context("list", relative: relativePath))
-            files = result.entries ?? []
+            if let key = fileIndexKey {
+                let result = try await call(context("list-tree", relative: ""))
+                guard let tree = result.tree else { throw AppServiceError("ファイル一覧を取得できませんでした。") }
+                fileIndexes[key] = AppFileIndex(tree, sourceIdentity: result.sourceIdentity)
+                showCachedFiles()
+            } else {
+                let result = try await call(context("list", relative: relativePath))
+                files = result.entries ?? []
+            }
         } catch {
             files = []
             fileListingError = error.localizedDescription
@@ -471,31 +429,30 @@ final class AppManager {
 
     private func context(_ action: String, relative: String) -> AppRequest {
         AppRequest(action: action, device: libraryMode ? nil : deviceID, appID: libraryMode ? nil : appID,
-                   regionID: regionID, backupPath: libraryMode ? backup?.path : nil, relative: relative)
+                   regionID: regionID, backupPath: libraryMode ? backup?.path : nil, relative: relative,
+                   containerPath: libraryMode ? nil : currentRegion?.path,
+                   sourceIdentity: fileIndexKey.flatMap { fileIndexes[$0]?.sourceIdentity })
     }
 
     private func join(_ leaf: String) -> String { relativePath.isEmpty ? leaf : relativePath + "/" + leaf }
 
     private func resetFiles() {
         files = []; selection = []; relativePath = ""; regionID = nil; fileSearch = ""; fileListingError = nil
-        closeEditor()
-    }
-
-    private func workspace() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("airlift-editor-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        workspaces.append(url)
-        return url
     }
 
     private func call(_ request: AppRequest) async throws -> AppResponse {
         var request = request
+        // Invalidate before attempting writes, including failures/partial restores.
+        // Shared App Groups may also be cached under a different owning app.
+        if ["mutate", "restore", "recover", "catalog"].contains(request.action), let device = request.device {
+            fileIndexes = fileIndexes.filter { $0.key.device != device }
+        }
         if request.action == "backup" || request.action == "restore" {
             request.verify = verificationEnabled
             operation?.append("内容検証: " + (verificationEnabled ? "有効" : "無効（スキップ）"))
         }
         request.cancelPath = cancellationURL?.path
-        return try await AppService.call(request) { [weak self] response in
+        return try await service(request) { [weak self] response in
             await self?.updateProgress(response)
         }
     }
@@ -530,7 +487,7 @@ final class AppManager {
                 if !showOperation { self.error = error.localizedDescription }
                 status = "処理を完了できませんでした"
                 if let deviceID,
-                   let result = try? await AppService.call(AppRequest(action: "pending", device: deviceID)) {
+                   let result = try? await service(AppRequest(action: "pending", device: deviceID), { _ in }) {
                     pending = result.pending ?? []
                 }
             }

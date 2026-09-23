@@ -34,7 +34,7 @@ struct AppHistoryView: View {
                     }
             }
         }
-        .disabled(manager.busy || manager.editor?.isDirty == true)
+        .disabled(manager.busy)
         .overlay {
             if backups.isEmpty {
                 ContentUnavailableView("バックアップはありません", systemImage: "archivebox",

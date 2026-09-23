@@ -1,6 +1,8 @@
 import Foundation
 
 enum AppService {
+    typealias Handler = @Sendable (AppRequest, @escaping @Sendable (AppResponse) async -> Void) async throws -> AppResponse
+
     static func call(
         _ request: AppRequest,
         progress: @escaping @Sendable (AppResponse) async -> Void = { _ in }

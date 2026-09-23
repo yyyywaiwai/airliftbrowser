@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import plistlib
 import posixpath
 import shutil
 import sys
@@ -67,15 +66,32 @@ async def listing_remote(lease, rel):
     return {"entries": entries}
 
 
+async def listing_tree(lease):
+    """Metadata only: never open/read file contents or follow symbolic links."""
+    from transport import tree_fingerprint
+    lease.reporter.check()
+    # Bundle copy readiness already traverses the full tree. Reuse that scan.
+    tree = lease.copy_tree
+    if tree is None:
+        tree = await tree_fingerprint(lease.afc, lease.root, lease.reporter)
+    entries = []
+    for path, kind, size, modified, target in tree:
+        lease.reporter.check()
+        entries.append({"id": path, "name": posixpath.basename(path),
+                        "kind": {"S_IFDIR": "directory", "S_IFREG": "file", "S_IFLNK": "link"}.get(kind, "other"),
+                        "size": size, "modified": modified.timestamp(), "target": target})
+    result = {"tree": entries}
+    if "originalRoot" in lease.state:
+        result["sourceIdentity"] = json.dumps(lease.state["originalRoot"], sort_keys=True)
+    return result
+
+
 def local_mutation(request, reporter):
     original, manifest, item, root = local_region(request)
     rel = relative(request.get("relative", ""))
     operation = request["operation"]
     if not rel or rel.split("/")[0] in MANAGED_NAMES:
         raise ValueError("コンテナルート・識別情報は変更できません。")
-    existing = child(root, rel, allow_leaf_link=True)
-    if request.get("expectedHash") and (existing.is_symlink() or sha256(existing, reporter) != request["expectedHash"]):
-        raise ValueError("編集開始後にファイルが変わりました。再度開いてください。")
     path, result = storage.clone(original, reporter)
     try:
         edited = next(r for r in result["regions"] if r["id"] == item["id"])
@@ -105,10 +121,7 @@ def local_mutation(request, reporter):
         else:
             raise ValueError("不明な編集操作です。")
         edited["entries"] = storage.inventory(base, reporter)
-        response = {"backup": storage.finish(path, result)}
-        if operation == "upload" and destination.is_file() and not destination.is_symlink():
-            response["hash"] = sha256(destination, reporter)
-        return response
+        return {"backup": storage.finish(path, result)}
     except BaseException:
         shutil.rmtree(path)
         raise
@@ -121,18 +134,12 @@ async def remote_mutation(request, lease, reporter):
         raise ValueError("コンテナルート・識別情報は変更できません。")
     operation = request["operation"]
     remote = await lease.path(rel, True)
-    if request.get("expectedHash"):
-        if await transport.file_hash(lease.afc, remote, reporter) != request["expectedHash"]:
-            raise ValueError("編集開始後に端末のファイルが変わりました。再度開いてください。")
     if operation == "delete":
         if not await lease.afc.exists(remote):
             raise ValueError("対象が見つかりません。")
         await lease.replace(rel)
     elif operation == "upload":
         await lease.upload(request["local"], rel, request.get("overwrite", False))
-        local = Path(request["local"])
-        if local.is_file() and not local.is_symlink():
-            return {"hash": sha256(local, reporter)}
     elif operation == "mkdir":
         with tempfile.TemporaryDirectory(prefix="airlift-empty-") as empty:
             await lease.upload(empty, rel)
@@ -362,63 +369,6 @@ async def verify_restore(lease, local, prefix, mode, expected_hashes=None):
             raise IOError("復元後の内容が一致しません: " + rel)
 
 
-def editor_read(request):
-    path = Path(request["local"])
-    size = path.stat().st_size
-    mode = request.get("mode", "text")
-    offset = max(0, int(request.get("offset", 0)))
-    if mode == "hex":
-        with path.open("rb") as stream:
-            stream.seek(offset)
-            data = stream.read(4096)
-        text = "\n".join(" ".join(f"{byte:02X}" for byte in data[n:n + 16]) for n in range(0, len(data), 16))
-        return {"text": text, "size": size, "offset": offset, "pageBytes": len(data), "encoding": "hex"}
-    if size > 16 * 1024 * 1024:
-        raise ValueError("16 MiBを超えるファイルは16進数表示で開いてください。")
-    data = path.read_bytes()
-    if mode == "plist":
-        value = plistlib.loads(data)
-        return {"text": plistlib.dumps(value, fmt=plistlib.FMT_XML, sort_keys=False).decode("utf-8"),
-                "encoding": "bplist" if data.startswith(b"bplist00") else "xmlplist", "size": size}
-    encoding = "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"
-    try:
-        text = data.decode(encoding)
-    except UnicodeDecodeError as error:
-        raise ValueError("テキストとして読めません。16進数表示を選択してください。") from error
-    return {"text": text, "encoding": encoding, "size": size}
-
-
-def editor_write(request):
-    path = Path(request["local"])
-    encoding, text = request["encoding"], request["text"]
-    if encoding == "hex":
-        data = bytes.fromhex(text)
-        expected = int(request["pageBytes"])
-        if len(data) != expected or expected > 4096:
-            raise ValueError("16進数編集では表示ページのバイト数を変えずに入力してください。")
-        offset = int(request.get("offset", 0))
-        if offset < 0 or offset + len(data) > path.stat().st_size:
-            raise ValueError("編集範囲がファイルの外です。")
-        with path.open("r+b") as stream:
-            stream.seek(offset)
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-    else:
-        if encoding in ("bplist", "xmlplist"):
-            data = plistlib.dumps(plistlib.loads(text.encode("utf-8")),
-                                 fmt=plistlib.FMT_BINARY if encoding == "bplist" else plistlib.FMT_XML,
-                                 sort_keys=False)
-        elif encoding in ("utf-8", "utf-8-sig", "utf-16"):
-            data = text.encode(encoding)
-        else:
-            raise ValueError("未対応の文字コードです。")
-        temporary = path.with_name(path.name + ".new")
-        temporary.write_bytes(data)
-        os.replace(temporary, path)
-    return {}
-
-
 async def dispatch(request, reporter):
     action = request["action"]
     if action == "backups":
@@ -427,10 +377,6 @@ async def dispatch(request, reporter):
         return {"backup": storage.import_backup(request["source"], reporter)}
     if action == "export":
         return storage.export_backup(request["backupPath"], request["destination"], request.get("xcappdata", False), reporter)
-    if action == "editor-read":
-        return editor_read(request)
-    if action == "editor-write":
-        return editor_write(request)
     if request.get("backupPath") and action in ("list", "get", "mutate"):
         path, manifest, item, root = local_region(request)
         if action == "list":
@@ -480,18 +426,37 @@ async def dispatch(request, reporter):
         return await backup(request, reporter)
     if action == "restore":
         return await restore(request, reporter)
+    if action not in ("list", "list-tree", "get", "mutate"):
+        raise ValueError("不明な操作です。")
     app, item = await catalog.resolve(request["device"], request["appID"], request["regionID"])
     await transport.quiesce(request["device"], app, reporter)
     async with transport.connection(request["device"]) as afc:
+        if action == "get":
+            # Keep the local result private until the selected item is restored
+            # and the lease's on-device cleanup has succeeded.
+            with download_destination(request["local"]) as temporary:
+                rel = relative(request["relative"])
+                scoped_copy = item["kind"] == "bundle" and bool(rel)
+                if scoped_copy and not request.get("file"):
+                    raise ValueError("取得対象の一覧情報が必要です。一覧を更新してください。")
+                if scoped_copy and request.get("containerPath") not in (None, item["path"]):
+                    raise ValueError("アプリ本体の場所が変更されました。一覧を更新してください。")
+                async with transport.Lease(request["device"], item["path"], reporter, afc,
+                                           selection=rel if scoped_copy else "",
+                                           copy_file=request["file"] if scoped_copy else None,
+                                           source_identity=request.get("sourceIdentity") if scoped_copy else None) as lease:
+                    if scoped_copy and request["file"]["kind"] == "link":
+                        temporary.symlink_to(request["file"]["target"])
+                    else:
+                        remote = lease.download_path if scoped_copy else await lease.path(rel, True)
+                        await transport.pull(afc, remote, temporary, reporter)
+            path = Path(request["local"])
+            return {"local": str(path), "hash": sha256(path, reporter) if path.is_file() and not path.is_symlink() else None}
         async with transport.Lease(request["device"], item["path"], reporter, afc) as lease:
+            if action == "list-tree":
+                return await listing_tree(lease)
             if action == "list":
                 return await listing_remote(lease, relative(request.get("relative", "")))
-            if action == "get":
-                remote = await lease.path(relative(request["relative"]), True)
-                with download_destination(request["local"]) as temporary:
-                    await transport.pull(afc, remote, temporary, reporter)
-                path = Path(request["local"])
-                return {"local": str(path), "hash": sha256(path, reporter) if path.is_file() and not path.is_symlink() else None}
             if action == "mutate":
                 return await remote_mutation(request, lease, reporter)
     raise ValueError("不明な操作です。")

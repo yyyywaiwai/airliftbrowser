@@ -85,7 +85,7 @@ private struct BrowserView: View {
                     locationButton("アプリ", icon: "square.grid.2x2", hint: "アプリのコンテナ管理\nアプリのデータ・App Group・本体を閲覧し、Macにバックアップします。", selected: appSection == "apps") {
                         appSection = "apps"
                     }
-                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したアプリのバックアップを閲覧・編集し、端末へリストアできます。", selected: appSection == "backups") {
+                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したバックアップのファイルを管理し、端末へリストアできます。", selected: appSection == "backups") {
                         appSection = "backups"
                     }
                     locationButton("Media", icon: "externaldrive", hint: "AFCで公開されるMedia領域のファイルを閲覧・操作します。", selected: appSection == "legacy" && browser.scope == .media) {
@@ -118,7 +118,7 @@ private struct BrowserView: View {
                 .padding(.bottom, 12)
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
-            .disabled(browser.blocksNewWork || appManager.busy || appManager.editor?.isDirty == true)
+            .disabled(browser.blocksNewWork || appManager.busy)
         } detail: {
             if appSection != "legacy" {
                 AppWorkspaceView(manager: appManager, deviceID: browser.deviceID, library: appSection == "backups")

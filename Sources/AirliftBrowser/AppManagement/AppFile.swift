@@ -1,6 +1,6 @@
 import Foundation
 
-struct AppFile: Decodable, Identifiable, Hashable, Sendable {
+struct AppFile: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let kind: String

@@ -30,7 +30,7 @@ struct AppDetailView: View {
                         manager.showAppActions()
                         history = false
                     }
-                    .disabled(manager.busy || manager.editor?.isDirty == true)
+                    .disabled(manager.busy)
                 }
             }.padding(18)
             Divider()
@@ -55,7 +55,7 @@ struct AppDetailView: View {
                         Text("編集すると新しい履歴として保存").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 10)
-                    .disabled(manager.busy || manager.editor?.isDirty == true)
+                    .disabled(manager.busy)
                     .onChange(of: manager.regionID) {
                         if !manager.busy { manager.selectRegion(manager.regionID) }
                     }

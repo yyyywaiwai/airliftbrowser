@@ -9,10 +9,12 @@ from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import plistlib
+import posixpath
 import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch, AsyncMock, MagicMock
 
 sys.dont_write_bytecode = True
@@ -148,6 +150,189 @@ class AFCOpenError(OSError):
 
 
 class Acceptance(unittest.TestCase):
+    def test_selected_export_moves_only_requested_item_and_recovers_lost_reply(self):
+        async def run(copied, directory, lose_reply):
+            with tempfile.TemporaryDirectory() as device:
+                afc = LocalAFC(device)
+                container = Path(device) / "target"
+                (container / "nested").mkdir(parents=True)
+                selected = container / "nested/selected"
+                if directory:
+                    selected.mkdir()
+                    (selected / "child").write_bytes(b"selected payload")
+                else:
+                    selected.write_bytes(b"selected payload")
+                sibling = container / "unrelated"
+                sibling.write_bytes(b"must not move or read")
+                moves = []
+
+                async def relocate(device_id, identifier, destination):
+                    if "/p0/p1/p2/" in identifier:
+                        member = "p0/p1/p2/" + identifier.rsplit("/", 1)[1]
+                        with zipfile.ZipFile(lease.work / "payload.zip") as archive:
+                            parent = archive.read(member).decode().removeprefix("../../../")
+                        afc.path(destination).symlink_to(Path(device) / parent, target_is_directory=True)
+                        return
+                    if identifier.startswith("../../airlift-recovered-"):
+                        source = afc.path(identifier.removeprefix("../../"))
+                    else:
+                        source = afc.path(posixpath.normpath(posixpath.join(transport.airlift.AIRLOCK_ROOT, identifier)))
+                    moves.append((source, afc.path(destination)))
+                    self.assertNotEqual(source, container)
+                    self.assertTrue(sibling.is_file())
+                    if copied and source == selected:
+                        if directory:
+                            shutil.copytree(source, afc.path(destination))
+                        else:
+                            shutil.copy2(source, afc.path(destination))
+                    else:
+                        source.rename(afc.path(destination))
+                    if lose_reply and len(moves) == 1:
+                        raise OSError("lost move reply")
+
+                async def cleanup(command):
+                    # The real bridge checks Books restoration and absence too.
+                    for path in command[3:6]:
+                        if await afc.exists(path):
+                            await transport.remove_tree(afc, path)
+                    return {"ok": True}
+
+                saved_stat = selected.stat()
+                copy_file = {"id": "nested/selected", "kind": "directory" if directory else "file",
+                             "size": saved_stat.st_size, "modified": datetime.datetime.fromtimestamp(saved_stat.st_mtime).timestamp()}
+                identity = json.dumps(transport.root_fingerprint(await afc.stat("/target")), sort_keys=True)
+                lease = transport.Lease("test", "/target", self.reporter, afc, selection="nested/selected",
+                                        copy_file=copy_file if copied else None, source_identity=identity if copied else None)
+                real_stat = afc.stat
+                async def guarded_stat(path):
+                    if copied and path.startswith("/airlift-link-") and "/target/" in path:
+                        raise AFCOpenError(10)
+                    return await real_stat(path)
+                try:
+                    with patch.object(transport, "native", AsyncMock()), patch.object(transport, "relocate", relocate), \
+                            patch.object(transport, "run_json", cleanup), patch.object(afc, "stat", guarded_stat):
+                        if lose_reply:
+                            with self.assertRaisesRegex(OSError, "lost move reply"):
+                                await lease.__aenter__()
+                        else:
+                            async with lease:
+                                self.assertEqual(lease.state["copiedSource"], copied)
+                                await transport.pull(afc, lease.root, self.root / "selected-download", self.reporter)
+                                self.assertTrue(sibling.is_file())
+                    self.assertEqual(selected.stat().st_size, saved_stat.st_size)
+                    self.assertEqual(selected.stat().st_mtime_ns, saved_stat.st_mtime_ns)
+                    payload = selected / "child" if directory else selected
+                    self.assertEqual(payload.read_bytes(), b"selected payload")
+                    self.assertEqual(sibling.read_bytes(), b"must not move or read")
+                    self.assertEqual(afc.bytes_read, 0 if lose_reply else len(b"selected payload"))
+                    self.assertEqual(moves[0][0], selected)
+                    self.assertEqual(len(moves), 1 if copied else 2)
+                    self.assertFalse(lease.work.exists())
+                    self.assertFalse(await afc.exists(lease.root))
+                finally:
+                    if lease.work.exists():
+                        shutil.rmtree(lease.work)
+                    download = self.root / "selected-download"
+                    if download.is_dir():
+                        shutil.rmtree(download)
+                    elif download.exists():
+                        download.unlink()
+        for copied in (False, True):
+            for directory in (False, True):
+                for lose_reply in (False, True):
+                    with self.subTest(copied=copied, directory=directory, lose_reply=lose_reply):
+                        asyncio.run(run(copied, directory, lose_reply))
+
+    def test_bundle_export_rejects_stale_snapshot_before_copy(self):
+        async def run():
+            afc = LocalAFC(self.root)
+            (self.root / "target").mkdir()
+            metadata = {"id": "file", "kind": "file", "size": 1, "modified": 1}
+            lease = transport.Lease("test", "/target", self.reporter, afc, selection="file",
+                                    copy_file=metadata, source_identity="stale installation")
+            async def link(device, identifier, destination):
+                afc.path(destination).symlink_to(self.root, target_is_directory=True)
+            try:
+                with patch.object(transport, "native", AsyncMock()), patch.object(transport, "relocate", AsyncMock(side_effect=link)) as relocate:
+                    with self.assertRaisesRegex(ValueError, "一覧の取得後"):
+                        await lease.open()
+                    self.assertEqual(relocate.await_count, 1)
+                    self.assertNotIn("copiedSource", lease.state)
+            finally:
+                shutil.rmtree(lease.work)
+        asyncio.run(run())
+
+    def test_selected_export_rejects_symlink_traversal_before_relocation(self):
+        async def run():
+            afc = LocalAFC(self.root)
+            (self.root / "target").mkdir()
+            (self.root / "outside").mkdir()
+            (self.root / "outside/file").write_bytes(b"outside")
+            (self.root / "target/link").symlink_to(self.root / "outside", target_is_directory=True)
+            lease = transport.Lease("test", "/target", self.reporter, afc, selection="link/file")
+            async def link(device, identifier, destination):
+                member = "p0/p1/p2/" + identifier.rsplit("/", 1)[1]
+                with zipfile.ZipFile(lease.work / "payload.zip") as archive:
+                    parent = archive.read(member).decode().removeprefix("../../../")
+                afc.path(destination).symlink_to(self.root / parent, target_is_directory=True)
+            try:
+                with patch.object(transport, "native", AsyncMock()), patch.object(transport, "relocate", AsyncMock(side_effect=link)) as relocate:
+                    with self.assertRaisesRegex(ValueError, "リンク先"):
+                        await lease.open()
+                    self.assertEqual(relocate.await_count, 1)
+                    self.assertEqual(lease.state["phase"], "linking")
+            finally:
+                shutil.rmtree(lease.work)
+        asyncio.run(run())
+
+    def test_listing_tree_reads_metadata_only_and_does_not_follow_links(self):
+        async def run():
+            root = self.root / "container"
+            (root / "Library/空フォルダ").mkdir(parents=True)
+            large = root / "Library/large.bin"
+            with large.open("wb") as stream:
+                stream.truncate(5 * 1024**3 + 1)
+            outside = self.root / "outside"
+            outside.mkdir()
+            (outside / "hidden").write_text("not in container")
+            (root / "alias").symlink_to(outside, target_is_directory=True)
+            afc = LocalAFC(self.root)
+            lease = transport.Lease("device", "/container", self.reporter, afc)
+            lease.root = "/container"
+            try:
+                with patch.object(afc, "fopen", AsyncMock(side_effect=AssertionError("payload opened"))):
+                    result = await manager.listing_tree(lease)
+                rows = {row["id"]: row for row in result["tree"]}
+                self.assertEqual(set(rows), {"Library", "Library/空フォルダ", "Library/large.bin", "alias"})
+                self.assertEqual(rows["Library/large.bin"]["size"], 5 * 1024**3 + 1)
+                self.assertEqual(rows["alias"]["kind"], "link")
+                self.assertEqual(rows["alias"]["target"], str(outside))
+                self.assertEqual(afc.bytes_read, 0)
+                # A copied bundle uses the tree from its completed readiness scan.
+                lease.copy_tree = await transport.tree_fingerprint(afc, lease.root)
+                with patch.object(afc, "listdir", AsyncMock(side_effect=AssertionError("rescanned"))):
+                    self.assertEqual(await manager.listing_tree(lease), result)
+                lease.copy_tree = []
+                self.assertEqual(await manager.listing_tree(lease), {"tree": []})
+            finally:
+                shutil.rmtree(lease.work)
+        asyncio.run(run())
+
+    def test_listing_tree_does_not_return_partial_scan_after_failure(self):
+        async def run():
+            afc = LocalAFC(self.root)
+            (self.root / "folder").mkdir()
+            lease = transport.Lease("device", "/", self.reporter, afc)
+            lease.root = "/"
+            try:
+                with patch.object(afc, "stat", AsyncMock(side_effect=OSError("disconnected"))):
+                    with self.assertRaisesRegex(OSError, "disconnected"):
+                        await manager.listing_tree(lease)
+                self.assertIsNone(lease.copy_tree)
+            finally:
+                shutil.rmtree(lease.work)
+        asyncio.run(run())
+
     def test_pull_skips_open_refusal_without_retry_and_keeps_fatal_errors(self):
         async def run():
             afc = LocalAFC(self.root)
@@ -235,19 +420,16 @@ class Acceptance(unittest.TestCase):
                          storage.signature(storage.inventory(destination / "AppData")))
         self.assertEqual(plistlib.loads((destination / "AppDataInfo.plist").read_bytes())["CFBundleIdentifier"], "test.source")
 
-    def test_edit_creates_independent_history_and_rejects_stale_hash(self):
+    def test_upload_creates_independent_history(self):
         backup = storage.import_backup(self.package(), self.reporter)
         old = Path(backup["path"]) / "Payload/Data/Documents/日本語.txt"
         replacement = self.root / "replacement.txt"
         replacement.write_text("edited", encoding="utf-8")
         request = {"backupPath": backup["path"], "regionID": "data:test.source", "relative": "Documents/日本語.txt",
-                   "operation": "upload", "local": str(replacement), "overwrite": True, "expectedHash": common.sha256(old)}
+                   "operation": "upload", "local": str(replacement), "overwrite": True}
         result = manager.local_mutation(request, self.reporter)["backup"]
         self.assertEqual(old.read_text(), "original\n")
         self.assertEqual((Path(result["path"]) / "Payload/Data/Documents/日本語.txt").read_text(), "edited")
-        request["backupPath"] = result["path"]
-        with self.assertRaisesRegex(ValueError, "編集開始後"):
-            manager.local_mutation(request, self.reporter)
 
     def test_manifest_tampering_and_symlink_traversal_are_rejected(self):
         backup = storage.import_backup(self.package(), self.reporter)
@@ -259,16 +441,6 @@ class Acceptance(unittest.TestCase):
             common.child(base, "../outside")
         with self.assertRaises(ValueError):
             common.child(base, "Payload/Data/Documents/link/child")
-
-    def test_binary_plist_edit_preserves_binary_encoding_and_types(self):
-        source = self.package() / "AppData/Library/Preferences/sample.plist"
-        read = manager.editor_read({"local": str(source), "mode": "plist"})
-        text = read["text"].replace("<integer>42</integer>", "<integer>43</integer>")
-        manager.editor_write({"local": str(source), "encoding": read["encoding"], "text": text})
-        self.assertTrue(source.read_bytes().startswith(b"bplist00"))
-        value = plistlib.loads(source.read_bytes())
-        self.assertEqual(value["count"], 43)
-        self.assertEqual(value["bytes"], b"\x00\xff")
 
     def test_incomplete_download_is_not_published(self):
         destination = self.root / "download.bin"
@@ -283,22 +455,6 @@ class Acceptance(unittest.TestCase):
             with common.download_destination(destination):
                 self.fail("existing file must not be replaced")
         self.assertEqual(destination.read_bytes(), b"existing")
-
-    def test_hex_edit_beyond_four_gib_is_bounded_and_preserves_neighbors(self):
-        source = self.root / "large.bin"
-        offset = 4 * 1024**3 + 64
-        with source.open("wb") as stream:
-            stream.truncate(offset + 32)
-            stream.seek(offset - 1)
-            stream.write(b"A" + b"B" * 32)
-        read = manager.editor_read({"local": str(source), "mode": "hex", "offset": offset})
-        self.assertEqual(read["pageBytes"], 32)
-        manager.editor_write({"local": str(source), "encoding": "hex", "offset": offset, "pageBytes": 32,
-                              "text": "43 " * 32})
-        with source.open("rb") as stream:
-            stream.seek(offset - 1)
-            self.assertEqual(stream.read(), b"A" + b"C" * 32)
-        self.assertEqual(source.stat().st_size, offset + 32)
 
     def test_streaming_exceeds_old_limit_without_large_buffers(self):
         async def run():

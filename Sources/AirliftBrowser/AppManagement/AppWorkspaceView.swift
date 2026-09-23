@@ -63,7 +63,7 @@ struct AppWorkspaceView: View {
                     }
                 }
                 .frame(minWidth: 210, idealWidth: 265, maxWidth: 360)
-                .disabled(manager.busy || manager.editor?.isDirty == true)
+                .disabled(manager.busy)
                 if manager.canBrowse {
                     AppDetailView(manager: manager, restoreSource: $restoreSource, showBackup: $showBackup)
                         .id(library ? manager.backupID : manager.appID)
@@ -72,7 +72,7 @@ struct AppWorkspaceView: View {
                     ContentUnavailableView(
                         library ? "バックアップを選択" : deviceID == nil ? "USBデバイスを接続" : "アプリを選択",
                         systemImage: library ? "archivebox" : "square.grid.2x2",
-                        description: Text(library ? "保存したアプリは、端末を接続せずに閲覧・編集できます。" : "アプリのデータ・App Group・本体を管理します。"))
+                        description: Text(library ? "保存したバックアップは、端末を接続せずにファイル管理できます。" : "アプリのデータ・App Group・本体を管理します。"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -125,7 +125,7 @@ struct AppWorkspaceView: View {
                     Button("削除", systemImage: "trash", role: .destructive) { manager.deleteBackup(backup) }
                         .help("選択したバックアップをゴミ箱に移動")
                 }
-                }.labelStyle(.iconOnly).disabled(manager.busy || manager.editor?.isDirty == true)
+                }.labelStyle(.iconOnly).disabled(manager.busy)
             }
         }
         .task(id: "\(deviceID ?? "offline")-\(library)") { manager.activate(device: deviceID, library: library) }

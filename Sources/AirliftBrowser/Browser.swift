@@ -1341,7 +1341,7 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
                     guard appManager.canTransferFiles,
                           let file = appManager.files.first(where: { $0.id == entry.id }) else { return }
                     appManager.selection = [entry.id]
-                    appManager.openFile(file)
+                    if file.isDirectory { appManager.navigate(file.id) }
                 } else if let browser {
                     browser.selection = [entry.id]
                     if entry.isDirectory { browser.navigate(entry.id) }

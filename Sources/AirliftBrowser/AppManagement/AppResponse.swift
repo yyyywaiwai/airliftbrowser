@@ -19,14 +19,10 @@ struct AppResponse: Decodable, Sendable {
     var backups: [AppBackup]?
     var backup: AppBackup?
     var entries: [AppFile]?
+    var tree: [AppFile]?
+    var sourceIdentity: String?
     var warnings: [String]?
     var pending: [PendingAppOperation]?
     var local: String?
-    var hash: String?
-    var text: String?
-    var encoding: String?
-    var size: Int64?
-    var offset: Int64?
-    var pageBytes: Int?
     var appID: String?
 }

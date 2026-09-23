@@ -4,6 +4,7 @@ Only the tiny link/bootstrap archive uses the original PoC. App payloads are
 streamed over one AFC connection, so neither ZIP32 nor its 128 MiB limit applies.
 """
 import asyncio
+from datetime import datetime
 from contextlib import asynccontextmanager
 import hashlib
 import importlib.util
@@ -146,9 +147,12 @@ async def remove_tree(afc, path, reporter=None):
 
 
 def root_fingerprint(info):
-    return {"kind": info["st_ifmt"], "size": info["st_size"],
-            "modified": info["st_mtime"].isoformat(),
-            "created": info["st_birthtime"].isoformat() if info.get("st_birthtime") else None}
+    result = {"kind": info["st_ifmt"], "size": info["st_size"],
+              "modified": info["st_mtime"].isoformat(),
+              "created": info["st_birthtime"].isoformat() if info.get("st_birthtime") else None}
+    if info["st_ifmt"] == "S_IFLNK":
+        result["target"] = info["LinkTarget"]
+    return result
 
 
 async def tree_fingerprint(afc, root, reporter=None):
@@ -307,8 +311,13 @@ async def push(afc, local, remote, reporter, verify=True):
 
 
 class Lease:
-    def __init__(self, device, target, reporter, afc, journal=None, step_prefix=None):
+    def __init__(self, device, target, reporter, afc, journal=None, step_prefix=None, *, selection="", copy_file=None, source_identity=None):
+        selection = relative(selection)
+        if copy_file is not None:
+            if not selection or copy_file.get("id") != selection or copy_file.get("kind") not in ("file", "directory", "link"):
+                raise ValueError("取得対象の一覧情報が一致しません。一覧を更新してください。")
         self.device, self.target, self.reporter, self.afc = device, target, reporter, afc
+        self.copy_tree = None
         self.step_prefix = step_prefix
         if journal:
             self.work = Path(journal)
@@ -319,13 +328,35 @@ class Lease:
             self.work.mkdir(parents=True)
             self.state = {"device": device, "target": target, "phase": "created",
                           "source": airlift.SOURCE_PREFIX + token, "link": airlift.LINK_PREFIX + token,
-                          "recovered": airlift.RECOVERED_PREFIX + token, "undo": [], "mutationComplete": False}
+                          "recovered": airlift.RECOVERED_PREFIX + token, "undo": [], "mutationComplete": False,
+                          "selection": selection}
+            if selection:
+                self.state["selectedTarget"] = posixpath.join(target, selection)
+            if copy_file is not None:
+                self.state["copyFile"] = copy_file
+                self.state["sourceIdentity"] = source_identity
             self.save()
         self.root = "/" + self.state["recovered"]
 
     @property
-    def original_alias(self):
+    def container_alias(self):
         return "/" + posixpath.join(self.state["link"], self.state["leaf"])
+
+    @property
+    def original_alias(self):
+        selection = self.state.get("selection", "")
+        return posixpath.join(self.container_alias, selection) if selection else self.container_alias
+
+    @property
+    def download_path(self):
+        return self.original_alias if self.state.get("selectedLink") else self.root
+
+    async def source_matches(self):
+        # Signed bundle contents cannot be stat'ed through AFC. Its installed
+        # container identity remains visible; compare that throughout the copy.
+        if self.state.get("copyFile"):
+            return root_fingerprint(await self.afc.stat(self.container_alias)) == self.state["sourceContainerRoot"]
+        return root_fingerprint(await self.afc.stat(self.original_alias)) == self.state["originalRoot"]
 
     def save(self, phase=None):
         if phase:
@@ -345,6 +376,8 @@ class Lease:
 
     async def open(self):
         self.reporter.progress("コンテナへ接続", force=True)
+        target = self.state.get("selectedTarget", self.target)
+        copy_file = self.state.get("copyFile")
         parent, leaf = posixpath.split(self.target)
         self.state["parent"], self.state["leaf"] = parent, leaf
         # The target was resolved from the current installation catalog. Some
@@ -358,7 +391,8 @@ class Lease:
         self.save("snapshotted")
         source, link, recovered = (self.state[k] for k in ("source", "link", "recovered"))
         link_id = f"../../{source}/p0/p1/p2/link"
-        target_id = posixpath.relpath(self.target, airlift.AIRLOCK_ROOT)
+        selection = self.state.get("selection", "")
+        target_id = posixpath.relpath(target, airlift.AIRLOCK_ROOT)
         restore_id = "../../" + recovered
         (self.work / "payload.zip").write_bytes(airlift.build_archive(parent, b"container"))
         (self.work / "Books.plist").write_bytes(airlift.build_books([link_id, target_id, restore_id]))
@@ -368,15 +402,36 @@ class Lease:
                      self.work / "payload.zip", self.work / "Books.plist", snapshot)
         self.save("linking")
         await relocate(self.device, link_id, link)
-        original_info = await self.afc.stat(self.original_alias)
-        if original_info["st_ifmt"] != "S_IFDIR":
-            raise ValueError("対象コンテナが見つかりません。")
+        if copy_file:
+            self.state["sourceContainerRoot"] = root_fingerprint(await self.afc.stat(self.container_alias))
+            if self.state.get("sourceIdentity"):
+                import json
+                if json.dumps(self.state["sourceContainerRoot"], sort_keys=True) != self.state["sourceIdentity"]:
+                    raise ValueError("アプリ本体が一覧の取得後に変更されました。一覧を更新してください。")
+            original_info = {"st_ifmt": {"file": "S_IFREG", "directory": "S_IFDIR", "link": "S_IFLNK"}[copy_file["kind"]],
+                             "st_size": copy_file["size"], "st_mtime": datetime.fromtimestamp(copy_file["modified"]),
+                             "LinkTarget": copy_file.get("target")}
+            # Bundle storage is copied to the data volume, never moved back.
+            # Persist this before the request so a lost reply can be recovered.
+            self.state["copiedSource"] = True
+        else:
+            if selection:
+                await remote_child(self.afc, self.container_alias, selection, leaf_link=True)
+            original_info = await self.afc.stat(self.original_alias)
+        allowed = ("S_IFDIR", "S_IFREG", "S_IFLNK") if selection else ("S_IFDIR",)
+        if original_info["st_ifmt"] not in allowed:
+            raise ValueError("対象のファイル／フォルダが見つかりません。")
         self.state["originalRoot"] = root_fingerprint(original_info)
+        if original_info["st_ifmt"] == "S_IFLNK":
+            # A link is exported as link metadata, never by moving/following its target.
+            self.state["selectedLink"] = True
+            self.save("open")
+            return
         self.save("moving")
-        self.reporter.progress("コンテナを転送用領域へ公開", force=True, phase="prepare")
+        self.reporter.progress("選択項目を転送用領域へ公開" if selection else "コンテナを転送用領域へ公開", force=True, phase="prepare")
         await relocate(self.device, target_id, recovered)
-        if (await self.afc.stat(self.root))["st_ifmt"] != "S_IFDIR":
-            raise ValueError("対象はコンテナディレクトリではありません。")
+        if (await self.afc.stat(self.root))["st_ifmt"] != original_info["st_ifmt"]:
+            raise ValueError("取得元と転送用領域のファイル種類が一致しません。")
         # On the bundle volume AirTraffic may copy instead of rename. In that
         # case the original is still live: the recovered view is read-only.
         await self.identify_copy()
@@ -385,6 +440,10 @@ class Lease:
         self.save("open")
 
     async def identify_copy(self):
+        if self.state.get("copyFile"):
+            if not await self.source_matches():
+                raise RuntimeError("取得中にアプリ本体が変更されました。回収データを保持しました。")
+            return
         source_present = await self.afc.exists(self.original_alias)
         if source_present:
             current = root_fingerprint(await self.afc.stat(self.original_alias))
@@ -402,27 +461,27 @@ class Lease:
         previous = None
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
-            self.reporter.progress("アプリ本体のコピー完了を待っています…", phase="device-copy", cancellable=cancellable)
-            source = root_fingerprint(await self.afc.stat(self.original_alias))
-            if source != expected:
+            self.reporter.progress("端末内コピーの完了を待っています…", phase="device-copy", cancellable=cancellable)
+            if not await self.source_matches():
                 raise RuntimeError("取得中に元の領域が変更されました。回収データを保持しました。")
             copied = await self.afc.stat(self.root)
-            ready = (copied["st_ifmt"] == "S_IFDIR" and copied["st_size"] == expected["size"]
+            ready = (copied["st_ifmt"] == expected["kind"] and copied["st_size"] == expected["size"]
                      and copied["st_mtime"].isoformat() == expected["modified"])
             if ready:
-                current = await tree_fingerprint(self.afc, self.root)
+                current = await tree_fingerprint(self.afc, self.root) if expected["kind"] == "S_IFDIR" else []
                 if current == previous:
                     # Recheck both roots after traversal; scanning can take time.
                     after = await self.afc.stat(self.root)
-                    if (after["st_size"] == expected["size"]
+                    if (after["st_ifmt"] == expected["kind"] and after["st_size"] == expected["size"]
                             and after["st_mtime"].isoformat() == expected["modified"]
-                            and root_fingerprint(await self.afc.stat(self.original_alias)) == expected):
+                            and await self.source_matches()):
+                        self.copy_tree = current
                         return
                 previous = current
             else:
                 previous = None
             if asyncio.get_running_loop().time() >= deadline:
-                raise RuntimeError("アプリ本体のコピーが時間内に完了しませんでした。回収データを保持しました。再接続後に未完了操作を復旧してください。")
+                raise RuntimeError("端末内コピーが時間内に完了しませんでした。回収データを保持しました。再接続後に未完了操作を復旧してください。")
             await asyncio.sleep(interval)
 
     async def __aexit__(self, error_type, error, traceback):
@@ -442,6 +501,8 @@ class Lease:
         return await remote_child(self.afc, self.root, rel, leaf_link)
 
     async def replace(self, rel, prepared=None):
+        if self.state.get("selection"):
+            raise ValueError("選択項目の取り出し中は変更できません。")
         if self.state.get("copiedSource"):
             raise ValueError("この領域は読み取り用コピーとして公開されています。閲覧・保存できます。")
         relative(rel)
@@ -460,6 +521,8 @@ class Lease:
             await self.afc.rename(prepared, destination)
 
     async def upload(self, local, rel, overwrite=False, verify=True):
+        if self.state.get("selection"):
+            raise ValueError("選択項目の取り出し中は変更できません。")
         if self.state.get("copiedSource"):
             raise ValueError("この領域は読み取り専用です。")
         if not rel or rel.split("/")[0] in MANAGED_NAMES:
@@ -522,10 +585,7 @@ class Lease:
             # conflicting replacement. Compare the source's pre-move identity.
             await self.identify_copy()
         if self.state.get("copiedSource"):
-            if not await self.afc.exists(self.original_alias):
-                raise RuntimeError("取得元を確認できません。回収データを保持しました。")
-            source_stat = await self.afc.stat(self.original_alias)
-            if root_fingerprint(source_stat) != self.state.get("originalRoot"):
+            if not await self.source_matches():
                 raise RuntimeError("取得中に元の領域が変更されました。回収データを保持しました。")
             if present:
                 # Also used for old journals and cancellation while copying:
@@ -534,11 +594,13 @@ class Lease:
             await self.cleanup()
             return
         if present:
-            self.reporter.progress("コンテナを元の場所へ戻しています", force=True, phase="return", cancellable=False)
+            self.reporter.progress("取得元へ戻しています", force=True, phase="return", cancellable=False)
             if not self.state["mutationComplete"]:
                 await self.rollback()
-            self.state["expectedNames"] = sorted(await self.afc.listdir(self.root))
-            self.state["expectedRootSize"] = (await self.afc.stat(self.root))["st_size"]
+            info = await self.afc.stat(self.root)
+            self.state["expectedNames"] = sorted(await self.afc.listdir(self.root)) if info["st_ifmt"] == "S_IFDIR" else []
+            self.state["expectedRootSize"] = info["st_size"]
+            self.state["expectedRootKind"] = info["st_ifmt"]
             self.state["expectedMetadata"] = {}
             for name in self.state["expectedNames"]:
                 info = await self.afc.stat(posixpath.join(self.root, name))
@@ -547,7 +609,7 @@ class Lease:
             if await self.afc.exists(self.original_alias):
                 raise RuntimeError("元の場所に別のコンテナが作られています。回収データを保持しました: " + str(self.work))
             await relocate(self.device, "../../" + self.state["recovered"],
-                           posixpath.join(self.state["link"], self.state["leaf"]))
+                           self.original_alias.lstrip("/"))
         if self.state["phase"] in ("moving", "open", "returning"):
             if not await self.afc.exists(self.original_alias) or await self.afc.exists(self.root):
                 raise RuntimeError("コンテナの復帰を確認できません。『未完了操作を復旧』を実行してください。")
@@ -555,9 +617,11 @@ class Lease:
             # sandbox policy denies enumerating it. Content hashes were checked
             # in Media before the rename; independently verify the destination.
             info = await self.afc.stat(self.original_alias)
-            if info["st_ifmt"] != "S_IFDIR" or ("expectedRootSize" in self.state and
+            if info["st_ifmt"] != self.state.get("expectedRootKind", self.state.get("originalRoot", {}).get("kind", "S_IFDIR")) or ("expectedRootSize" in self.state and
                     info["st_size"] != self.state["expectedRootSize"]):
                 raise RuntimeError("復帰先の状態が一致しません。復旧記録を保持しました。")
+            if self.state.get("selection") and root_fingerprint(info) != self.state["originalRoot"]:
+                raise RuntimeError("取り出した項目の復帰先メタデータが一致しません。復旧記録を保持しました。")
         await self.cleanup()
 
 
