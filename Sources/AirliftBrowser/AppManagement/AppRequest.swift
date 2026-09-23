@@ -22,4 +22,5 @@ struct AppRequest: Encodable, Sendable {
     var encoding: String?
     var cancelPath: String?
     var verify: Bool?
+    var regionKinds: [String]?
 }

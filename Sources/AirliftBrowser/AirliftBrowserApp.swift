@@ -7,6 +7,7 @@ struct AirliftBrowserApp: App {
     var body: some Scene {
         Window("Airlift Browser", id: "browser") {
             BrowserView()
+                .background(ToolbarLabels())
         }
         .defaultSize(width: 1040, height: 680)
         .commands { CommandGroup(replacing: .newItem) {} }
@@ -306,11 +307,12 @@ private struct BrowserView: View {
                 ToolbarItemGroup {
                     Button("更新", systemImage: "arrow.clockwise") { browser.reload() }
                         .keyboardShortcut("r").disabled(browser.deviceID == nil || browser.blocksNewWork)
+                    if browser.scope != .cards {
                     Button("フォルダ作成", systemImage: "folder.badge.plus") {
                         naming = NameRequest(entry: nil)
-                    }.disabled(browser.deviceID == nil || browser.scope == .cards || browser.blocksNewWork)
+                    }.disabled(browser.deviceID == nil || browser.blocksNewWork)
                     Button("送信", systemImage: "square.and.arrow.up") { browser.upload() }
-                        .disabled(browser.deviceID == nil || browser.scope == .cards || browser.blocksNewWork)
+                        .disabled(browser.deviceID == nil || browser.blocksNewWork)
                     Button("Macに保存", systemImage: "square.and.arrow.down") { browser.download() }
                         .disabled(browser.blocksNewWork || browser.selectedEntries.isEmpty
                                   || browser.selectedEntries.contains { !browser.canExport($0) })
@@ -326,6 +328,7 @@ private struct BrowserView: View {
                         Button("このフォルダを検証", systemImage: "checkmark.shield") {
                             showPoC = true
                         }
+                    }
                     }
                 }
             }

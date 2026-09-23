@@ -173,18 +173,23 @@ async def backup(request, reporter):
     import transport
     verify = request.get("verify", True)
     app, device_info = await catalog.resolve(request["device"], request["appID"])
-    if not app["regions"]:
-        raise ValueError("このアプリには取得可能なコンテナがありません。")
-    reporter.plan(operation_steps(app["regions"], backup=True))
+    kinds = request.get("regionKinds", ["data", "group", "bundle"])
+    if not isinstance(kinds, list) or not kinds or any(kind not in ("data", "group", "bundle") for kind in kinds):
+        raise ValueError("バックアップ対象を選択してください。")
+    regions = [item for item in app["regions"] if item["kind"] in kinds]
+    if not regions:
+        raise ValueError("選択した対象には取得可能なコンテナがありません。")
+    reporter.plan(operation_steps(regions, backup=True))
     reporter.begin("prepare")
     await transport.quiesce(request["device"], app, reporter)
     reporter.end()
     path, manifest = storage.create(app, device_info)
     manifest["verification"] = "sha256" if verify else "skipped"
+    manifest["selectedRegionKinds"] = kinds
     try:
         async with transport.connection(request["device"]) as afc:
-            for index, item in enumerate(app["regions"], 1):
-                reporter.set_region(item["name"], index, len(app["regions"]))
+            for index, item in enumerate(regions, 1):
+                reporter.set_region(item["name"], index, len(regions))
                 reporter.progress("バックアップ: " + item["name"], force=True, phase="prepare")
                 destination = child(path, storage.region_folder(item))
                 destination.parent.mkdir(parents=True, exist_ok=True)

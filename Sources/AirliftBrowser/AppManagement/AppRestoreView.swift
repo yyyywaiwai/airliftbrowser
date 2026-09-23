@@ -32,8 +32,8 @@ struct AppRestoreView: View {
                 }.pickerStyle(.segmented)
                 Text(mode == "replace" ? "選択した領域を保存時点に揃えます。バックアップにない現在の項目は削除します。" : "同名項目を上書きし、それ以外の現在の項目は残します。")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("内容検証を行う", isOn: $manager.verificationEnabled)
-                Text("オフの場合、バックアップの事前照合と復元後の読み戻し照合を省略します。")
+                Toggle("バックアップ／リストアの内容検証", isOn: $manager.verificationEnabled)
+                Text("共通設定として保存します。オフの場合、バックアップ時の保存内容の再照合、リストア前の内容照合と復元後の読み戻し照合を省略します。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
@@ -50,14 +50,14 @@ struct AppRestoreView: View {
                     }
                 }
             }.frame(maxHeight: 220)
-            HStack {
+            AppGlassActions {
                 Button("復元先を更新", action: manager.loadRestoreApps)
                 if manager.busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("キャンセル", role: .cancel) { dismiss() }
                 Button("リストア") {
                     if let target { manager.restore(backup, target: target, mode: mode, mappings: chosenMappings) }
-                }.buttonStyle(.borderedProminent)
+                }.modifier(AppPrimaryButtonStyle())
                     .disabled(target == nil || chosenMappings.isEmpty || Set(chosenMappings.values).count != chosenMappings.count)
             }
         }

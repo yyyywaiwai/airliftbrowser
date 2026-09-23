@@ -494,6 +494,22 @@ class Acceptance(unittest.TestCase):
                     if step["total"] is not None:
                         self.assertEqual(step["completed"], step["total"])
 
+                # Unselected containers must never be opened, and intentionally
+                # excluding them must not mark the snapshot as partial.
+                app["regions"].append({"id": "group:test", "kind": "group", "identifier": "group.test",
+                                       "name": "App Group", "path": "/unselected"})
+                selected_reporter = QuietReporter()
+                selected = await manager.backup({"device": "test", "appID": app["id"],
+                                                 "regionKinds": ["data"]}, selected_reporter)
+                self.assertEqual(selected["backup"]["status"], "complete")
+                self.assertEqual([r["kind"] for r in selected["backup"]["regions"]], ["data"])
+                self.assertEqual(len(selected_reporter.steps), 8)
+                self.assertEqual(storage.load(selected["backup"]["path"], verify=True)["selectedRegionKinds"], ["data"])
+                for kinds in ([], ["unknown"], "data", ["bundle"]):
+                    with self.assertRaises(ValueError), patch.object(storage, "create", side_effect=AssertionError("must not create backup")):
+                        await manager.backup({"device": "test", "appID": app["id"], "regionKinds": kinds}, QuietReporter())
+                app["regions"].pop()
+
                 request = {"device": "test", "appID": app["id"], "backupPath": path,
                            "mappings": {"data:test.source": "data:test.source"}, "verify": False}
                 (live / "document").write_bytes(b"changed")

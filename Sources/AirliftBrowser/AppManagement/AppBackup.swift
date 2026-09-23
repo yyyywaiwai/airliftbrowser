@@ -13,6 +13,8 @@ struct AppBackup: Decodable, Identifiable, Hashable, Sendable {
     let issues: [String]
     let regions: [AppRegion]
 
+    var canRestore: Bool { status != "incomplete" && regions.contains { $0.kind != "bundle" } }
+
     var dateLabel: String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

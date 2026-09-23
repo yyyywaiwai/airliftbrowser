@@ -25,15 +25,20 @@ struct AppHistoryView: View {
                             .disabled(!backup.regions.contains { $0.kind == "data" })
                     }
                     Button("リストア") { restoreSource = backup }
-                        .disabled(manager.deviceID == nil || backup.regions.isEmpty || backup.status == "incomplete")
+                        .disabled(manager.deviceID == nil || !backup.canRestore)
+                    Button("削除", systemImage: "trash", role: .destructive) { manager.deleteBackup(backup) }
+                        .labelStyle(.iconOnly).help("バックアップをゴミ箱に移動")
                 }.padding(.vertical, 8)
+                    .contextMenu {
+                        AppBackupMenu(manager: manager, backup: backup, restoreSource: $restoreSource)
+                    }
             }
         }
-        .disabled(manager.busy)
+        .disabled(manager.busy || manager.editor?.isDirty == true)
         .overlay {
             if backups.isEmpty {
                 ContentUnavailableView("バックアップはありません", systemImage: "archivebox",
-                                       description: Text("ツールバーからアプリ全体を保存できます。"))
+                                       description: Text("ツールバーから対象を選んでバックアップできます。"))
             }
         }
     }

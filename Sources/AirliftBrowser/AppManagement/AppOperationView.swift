@@ -93,7 +93,7 @@ struct AppOperationView: View {
                     }
                 }
             }.frame(minHeight: 140)
-            HStack {
+            AppGlassActions {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(operation.cancelling ? "中止処理中です。コンテナの復帰と後片付けを待っています。" : "128 MiBを超えるファイルも、分割ファイルを作らずストリーミング転送します。")
                     if operation.running {

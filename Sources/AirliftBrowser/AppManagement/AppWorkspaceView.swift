@@ -5,6 +5,7 @@ struct AppWorkspaceView: View {
     let deviceID: String?
     let library: Bool
     @State private var restoreSource: AppBackup?
+    @State private var showBackup = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,9 +44,15 @@ struct AppWorkspaceView: View {
                                         Text(ByteCountFormatter.string(fromByteCount: backup.totalBytes, countStyle: .file))
                                     }.font(.caption2).foregroundStyle(backup.status == "complete" ? Color.secondary : Color.orange)
                                 }.padding(.vertical, 5).tag(backup.id)
+                                    .contextMenu {
+                                        AppBackupMenu(manager: manager, backup: backup, restoreSource: $restoreSource)
+                                    }
                             }
                         }
                         .onChange(of: manager.backupID) { manager.selectBackup(manager.backupID) }
+                        .onDeleteCommand {
+                            if let backup = manager.backup { manager.deleteBackup(backup) }
+                        }
                     } else {
                         List(selection: $manager.appID) {
                             ForEach(manager.visibleApps) { app in
@@ -100,33 +107,31 @@ struct AppWorkspaceView: View {
                 Group {
                 Button("更新", systemImage: "arrow.clockwise", action: manager.refresh).keyboardShortcut("r")
                 Button("読み込み", systemImage: "square.and.arrow.down", action: manager.importBackup)
-                Menu("転送設定", systemImage: "slider.horizontal.3") {
-                    Toggle("バックアップ／リストアの内容検証", isOn: $manager.verificationEnabled)
-                }
-                .accessibilityLabel("転送設定")
-                .help("バックアップ／リストアの内容検証を設定")
                 if !library {
-                    Button("アプリ全体をバックアップ", systemImage: "archivebox", action: manager.backupApp)
+                    Button("バックアップ", systemImage: "archivebox") { showBackup = true }
                         .disabled(manager.app == nil || manager.regions.isEmpty || deviceID == nil)
                 } else if let backup = manager.backup {
-                    Menu("書き出し", systemImage: "square.and.arrow.up") {
+                    Menu("エクスポート", systemImage: "square.and.arrow.up") {
                         Button("Airliftバックアップ…") { manager.exportBackup(backup, xcappdata: false) }
                         Button("xcappdata…") { manager.exportBackup(backup, xcappdata: true) }
                             .disabled(!backup.regions.contains { $0.kind == "data" })
                     }
                     Button("リストア", systemImage: "arrow.uturn.backward") { restoreSource = backup }
-                        .disabled(deviceID == nil || backup.regions.isEmpty || backup.status == "incomplete")
+                        .disabled(deviceID == nil || !backup.canRestore)
+                    Button("削除", systemImage: "trash", role: .destructive) { manager.deleteBackup(backup) }
+                        .help("選択したバックアップをゴミ箱に移動")
                 }
-                }.disabled(manager.busy || manager.editor?.isDirty == true)
+                }.labelStyle(.iconOnly).disabled(manager.busy || manager.editor?.isDirty == true)
             }
         }
         .task(id: "\(deviceID ?? "offline")-\(library)") { manager.activate(device: deviceID, library: library) }
         .sheet(isPresented: Binding(
-            get: { restoreSource != nil || manager.operation != nil },
-            set: { if !$0 && !manager.busy { restoreSource = nil; manager.operation = nil } }
+            get: { showBackup || restoreSource != nil || manager.operation != nil },
+            set: { if !$0 && !manager.busy { showBackup = false; restoreSource = nil; manager.operation = nil } }
         )) {
             if let operation = manager.operation {
                 AppOperationView(operation: operation, cancel: manager.cancel) {
+                    showBackup = false
                     restoreSource = nil
                     manager.operation = nil
                 }
@@ -134,6 +139,8 @@ struct AppWorkspaceView: View {
                        height: max(480, (NSApp.mainWindow?.contentLayoutRect.height ?? 690) - 40))
             } else if let source = restoreSource {
                 AppRestoreView(manager: manager, backup: source)
+            } else if showBackup {
+                AppBackupView(manager: manager)
             }
         }
         .alert("操作を完了できませんでした", isPresented: Binding(get: { manager.error != nil }, set: { if !$0 { manager.error = nil } })) {

@@ -128,10 +128,11 @@ final class AppManager {
         else { activate(device: deviceID, library: libraryMode) }
     }
 
-    func backupApp() {
-        guard let deviceID, let appID else { return }
-        perform("アプリ全体をバックアップ", showSheet: true) {
-            let result = try await self.call(AppRequest(action: "backup", device: deviceID, appID: appID))
+    func backupApp(regionKinds: Set<String>) {
+        guard let deviceID, let appID, !regionKinds.isEmpty else { return }
+        perform("アプリをバックアップ", showSheet: true) {
+            let result = try await self.call(AppRequest(action: "backup", device: deviceID, appID: appID,
+                                                        regionKinds: regionKinds.sorted()))
             if let saved = result.backup {
                 // The helper already returned the committed snapshot. Update
                 // history directly rather than launching another locked helper
@@ -174,6 +175,26 @@ final class AppManager {
         perform("バックアップを書き出し", showSheet: true, appName: backup.name) {
             _ = try await self.call(AppRequest(action: "export", backupPath: backup.path, destination: url.path, xcappdata: xcappdata))
             self.status = "バックアップの書き出しが完了しました"
+        }
+    }
+
+    func revealBackup(_ backup: AppBackup) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: backup.path)])
+    }
+
+    func deleteBackup(_ backup: AppBackup) {
+        guard !busy, editor?.isDirty != true else { return }
+        perform("バックアップをゴミ箱に移動") {
+            let path = backup.path
+            try await Task.detached {
+                try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+            }.value
+            self.backups.removeAll { $0.id == backup.id }
+            if self.backupID == backup.id {
+                self.backupID = nil
+                if self.libraryMode { self.resetFiles() }
+            }
+            self.status = "「\(backup.name)」をゴミ箱に移動しました"
         }
     }
 
