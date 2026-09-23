@@ -162,9 +162,12 @@ final class AppManager {
                 self.pending = response.pending ?? []
                 self.warnings = response.warnings ?? []
             }
-            if self.canBrowse {
+            if self.libraryMode, self.canBrowse {
                 self.regionID = self.regions.first?.id
                 try await self.loadFiles()
+            } else if !self.libraryMode {
+                self.resetFiles()
+                self.status = self.app == nil ? "アプリを選択してください" : "操作を選択してください"
             }
         }
     }
@@ -173,11 +176,13 @@ final class AppManager {
         guard !busy else { return }
         appID = id
         resetFiles()
-        regionID = app?.regions.first?.id
-        guard app != nil else { return }
-        perform("コンテナを開く") {
-            try await self.loadFiles()
-        }
+        status = app == nil ? "アプリを選択してください" : "操作を選択してください"
+    }
+
+    func showAppActions() {
+        guard !busy, editor?.isDirty != true else { return }
+        resetFiles()
+        status = "操作を選択してください"
     }
 
     func selectBackup(_ id: String?) {
@@ -206,7 +211,7 @@ final class AppManager {
 
     func refresh() {
         guard !busy else { return }
-        if canBrowse { perform("一覧を更新") { try await self.loadFiles(); try await self.loadBackups() } }
+        if canBrowse, currentRegion != nil { perform("一覧を更新") { try await self.loadFiles(); try await self.loadBackups() } }
         else { activate(device: deviceID, library: libraryMode) }
     }
 

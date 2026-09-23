@@ -3,6 +3,7 @@ import SwiftUI
 struct AppDetailView: View {
     @Bindable var manager: AppManager
     @Binding var restoreSource: AppBackup?
+    @Binding var showBackup: Bool
     @State private var history = false
 
     var body: some View {
@@ -24,17 +25,24 @@ struct AppDetailView: View {
                     }
                 }
                 Spacer()
-                if !manager.libraryMode {
-                    Picker("表示", selection: $history) {
-                        Text("ファイル").tag(false)
-                        Text("バックアップ履歴").tag(true)
-                    }.pickerStyle(.segmented).frame(width: 210)
-                        .disabled(manager.editor?.isDirty == true)
+                if !manager.libraryMode, history || manager.regionID != nil {
+                    Button("操作を選択", systemImage: "chevron.backward") {
+                        manager.showAppActions()
+                        history = false
+                    }
+                    .disabled(manager.busy || manager.editor?.isDirty == true)
                 }
             }.padding(18)
             Divider()
             if history && !manager.libraryMode {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("リストア").font(.headline)
+                    Text("復元するバックアップを選択してください。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(16)
                 AppHistoryView(manager: manager, restoreSource: $restoreSource)
+            } else if !manager.libraryMode, manager.regionID == nil {
+                AppActionsView(manager: manager, showBackup: $showBackup, showRestore: $history)
             } else {
                 HStack {
                     Picker("領域", selection: $manager.regionID) {

@@ -65,7 +65,8 @@ struct AppWorkspaceView: View {
                 .frame(minWidth: 210, idealWidth: 265, maxWidth: 360)
                 .disabled(manager.busy || manager.editor?.isDirty == true)
                 if manager.canBrowse {
-                    AppDetailView(manager: manager, restoreSource: $restoreSource)
+                    AppDetailView(manager: manager, restoreSource: $restoreSource, showBackup: $showBackup)
+                        .id(library ? manager.backupID : manager.appID)
                         .frame(minWidth: 420, maxWidth: .infinity)
                 } else {
                     ContentUnavailableView(
