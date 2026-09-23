@@ -451,14 +451,29 @@ async def dispatch(request, reporter):
         return result
     if action == "recover":
         return await transport.recover(request["device"], reporter)
-    if action == "icon":
+    if action in ("icon", "icons"):
         from pymobiledevice3.lockdown import create_using_usbmux
         from pymobiledevice3.services.springboard import SpringBoardServicesService
-        async with await create_using_usbmux(serial=request["device"]) as lockdown:
+        icons = request["icons"] if action == "icons" else {request["appID"]: request["local"]}
+        async with await asyncio.wait_for(create_using_usbmux(serial=request["device"]), 15) as lockdown:
             async with SpringBoardServicesService(lockdown) as service:
-                data = await service.get_icon_pngdata(request["appID"])
-        Path(request["local"]).write_bytes(data)
-        return {"local": request["local"]}
+                for app_id, local in icons.items():
+                    try:
+                        data = await asyncio.wait_for(service.get_icon_pngdata(app_id), 10)
+                        Path(local).write_bytes(data)
+                    except (asyncio.TimeoutError, ConnectionError, EOFError):
+                        # A timed-out stream cannot safely be reused for the next app.
+                        raise
+                    except Exception as error:
+                        if action == "icon":
+                            raise
+                        print(json.dumps({"event": "progress", "appID": app_id,
+                                          "error": str(error)}, ensure_ascii=False), flush=True)
+                    else:
+                        if action == "icons":
+                            print(json.dumps({"event": "progress", "appID": app_id,
+                                              "local": local}), flush=True)
+        return {"local": request["local"]} if action == "icon" else {}
     if transport.pending(request["device"]):
         raise ValueError("この端末には未完了の操作があります。先に『未完了操作を復旧』を実行してください。")
     if action == "backup":
@@ -492,7 +507,7 @@ def main():
     with (HOME / "manager.lock").open("a") as lock:
         try:
             # SpringBoard icons are read-only and do not use container leases.
-            if request["action"] != "icon":
+            if request["action"] not in ("icon", "icons"):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = asyncio.run(dispatch(request, reporter))
             print(json.dumps({"event": "result", "ok": True, **result}, ensure_ascii=False), flush=True)

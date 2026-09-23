@@ -13,7 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 sys.dont_write_bytecode = True
 SANDBOX = tempfile.TemporaryDirectory(prefix="airlift-tests-")
@@ -24,6 +24,54 @@ import common
 import manager
 import storage
 import transport
+
+
+class AppIconTests(unittest.TestCase):
+    def run_batch(self, root, results):
+        service = MagicMock()
+        service.__aenter__ = AsyncMock(return_value=service)
+        service.__aexit__ = AsyncMock(return_value=False)
+        service.get_icon_pngdata = AsyncMock(side_effect=results)
+        lockdown = MagicMock()
+        lockdown.__aenter__ = AsyncMock(return_value=lockdown)
+        lockdown.__aexit__ = AsyncMock(return_value=False)
+        create = AsyncMock(return_value=lockdown)
+        factory = MagicMock(return_value=service)
+        modules = {
+            "pymobiledevice3.lockdown": MagicMock(create_using_usbmux=create),
+            "pymobiledevice3.services.springboard": MagicMock(SpringBoardServicesService=factory),
+        }
+        request = {"action": "icons", "device": "test-device", "icons": {
+            name: str(Path(root) / (name + ".png")) for name in ("first", "second", "third")
+        }}
+        output = io.StringIO()
+        with patch.dict(sys.modules, modules), patch.object(manager, "ensure_python"), redirect_stdout(output):
+            try:
+                asyncio.run(manager.dispatch(request, None))
+            finally:
+                self.events = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.service = service
+        create.assert_awaited_once_with(serial="test-device")
+        factory.assert_called_once_with(lockdown)
+
+    def test_batch_reuses_connection_and_preserves_partial_success(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.run_batch(root, [b"first-png", ValueError("missing icon"), b"third-png"])
+            self.assertEqual(Path(root, "first.png").read_bytes(), b"first-png")
+            self.assertFalse(Path(root, "second.png").exists())
+            self.assertEqual(Path(root, "third.png").read_bytes(), b"third-png")
+        self.assertEqual([event["appID"] for event in self.events], ["first", "second", "third"])
+        self.assertEqual(self.events[1]["error"], "missing icon")
+        self.assertTrue(all(event["event"] == "progress" for event in self.events))
+
+    def test_timeout_stops_using_connection_and_keeps_delivered_icons(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(asyncio.TimeoutError):
+                self.run_batch(root, [b"first-png", asyncio.TimeoutError(), b"third-png"])
+            self.assertEqual(Path(root, "first.png").read_bytes(), b"first-png")
+            self.assertFalse(Path(root, "third.png").exists())
+        self.assertEqual(self.service.get_icon_pngdata.await_count, 2)
+        self.assertEqual([event["appID"] for event in self.events], ["first"])
 
 
 class QuietReporter(common.Reporter):

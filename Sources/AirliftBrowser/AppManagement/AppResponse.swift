@@ -28,4 +28,5 @@ struct AppResponse: Decodable, Sendable {
     var size: Int64?
     var offset: Int64?
     var pageBytes: Int?
+    var appID: String?
 }
