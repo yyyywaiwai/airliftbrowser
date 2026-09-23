@@ -93,7 +93,46 @@ class LocalAFC:
         handle.close()
 
 
+class AFCOpenError(OSError):
+    def __init__(self, status):
+        super().__init__(status, f"Opcode: FILE_OPEN failed with status: {status}")
+        self.status = status
+
+
 class Acceptance(unittest.TestCase):
+    def test_pull_skips_open_refusal_without_retry_and_keeps_fatal_errors(self):
+        async def run():
+            afc = LocalAFC(self.root)
+            (self.root / "source").write_bytes(b"payload")
+            for status in (1, 10):
+                issues = []
+                destination = self.root / f"skipped-{status}"
+                error = AFCOpenError(status)
+                output = io.StringIO()
+                with patch.object(afc, "fopen", AsyncMock(side_effect=error)) as fopen, redirect_stdout(output):
+                    await transport.pull(afc, "/source", destination, common.Reporter(), issues=issues)
+                self.assertEqual(fopen.await_count, 1)
+                self.assertEqual(issues, [{"path": "source", "error": str(error)}])
+                self.assertFalse(destination.exists())
+                events = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertEqual(len(events), 1)
+                self.assertIn("スキップ（未取得）: source", events[0]["message"])
+                self.assertIn(str(error), events[0]["message"])
+
+            for status, tolerated in ((1, False), (10, False), (11, True), (12, True), (30, True)):
+                destination = self.root / f"failure-{status}"
+                with patch.object(afc, "fopen", AsyncMock(side_effect=AFCOpenError(status))) as fopen:
+                    with self.assertRaisesRegex(OSError, "source"):
+                        await transport.pull(afc, "/source", destination, self.reporter,
+                                             issues=[] if tolerated else None)
+                    self.assertEqual(fopen.await_count, 1)
+                    self.assertFalse(destination.exists())
+
+            with patch.object(afc, "fread", AsyncMock(side_effect=OSError("read failed"))):
+                with self.assertRaisesRegex(OSError, "read failed"):
+                    await transport.pull(afc, "/source", self.root / "read-failure", self.reporter, issues=[])
+        asyncio.run(run())
+
     def test_cleanup_reports_progress_without_following_links_or_honoring_cancel(self):
         async def run():
             afc = LocalAFC(self.root)
@@ -555,6 +594,39 @@ class Acceptance(unittest.TestCase):
                 for step in reporter.steps:
                     if step["total"] is not None:
                         self.assertEqual(step["completed"], step["total"])
+
+                # A protected WebKit blob used to abort the entire data region,
+                # dropping later Preferences/Documents from the manifest.
+                blocked = live / "Library/Caches/WebKit/NetworkCache/Version 17/Blobs/protected"
+                blocked.parent.mkdir(parents=True)
+                blocked.write_bytes(b"protected cache")
+                original_open = afc.fopen
+
+                async def refuse_blob(remote, mode):
+                    if remote.endswith("/protected"):
+                        raise AFCOpenError(1)
+                    return await original_open(remote, mode)
+
+                for verify in (False, True):
+                    with patch.object(afc, "fopen", refuse_blob):
+                        partial = await manager.backup({"device": "test", "appID": app["id"], "verify": verify}, QuietReporter())
+                    saved = storage.load(partial["backup"]["path"], verify=True)
+                    self.assertEqual(saved["status"], "partial")
+                    self.assertEqual(len(saved["regions"]), 1)
+                    region = saved["regions"][0]
+                    self.assertEqual(region["issues"][0]["path"], str(blocked.relative_to(live)))
+                    self.assertIn(str(blocked.relative_to(live)), saved["issues"][0])
+                    self.assertEqual([e["path"] for e in region["entries"] if e["kind"] == "file"], ["document"])
+                    self.assertEqual(saved["totalBytes"], len(b"backup payload"))
+                    destination = Path(partial["backup"]["path"]) / region["folder"]
+                    self.assertFalse((destination / blocked.relative_to(live)).exists())
+                    self.assertEqual((destination / "document").read_bytes(), b"backup payload")
+                    partial_request = {**request, "backupPath": partial["backup"]["path"]}
+                    with self.assertRaisesRegex(ValueError, "マージ復元"):
+                        await manager.restore(partial_request, QuietReporter())
+                    with patch.object(afc, "get_device_info", AsyncMock(return_value={"FSFreeBytes": 1024**3}), create=True):
+                        await manager.restore({**partial_request, "mode": "merge"}, QuietReporter())
+                    self.assertEqual(blocked.read_bytes(), b"protected cache")
         asyncio.run(run())
 
 

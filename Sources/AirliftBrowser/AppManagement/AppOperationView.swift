@@ -49,19 +49,23 @@ struct AppOperationView: View {
                           systemImage: operation.failed ? "exclamationmark.triangle" : "checkmark.circle.fill")
                         .foregroundStyle(operation.failed ? Color.orange : Color.green)
                 }
-                Text(operation.message).font(.callout).lineLimit(3).textSelection(.enabled)
-                HStack {
-                    if let completed = operation.completed, let total = operation.total {
-                        Text("現在のファイル: \(AppOperation.bytes(completed)) / \(AppOperation.bytes(total))")
+                Text(operation.message).font(.callout)
+                    .lineLimit(3, reservesSpace: true).textSelection(.enabled)
+                ZStack(alignment: .leading) {
+                    Text("転送情報").hidden().accessibilityHidden(true)
+                    HStack {
+                        if let completed = operation.completed, let total = operation.total {
+                            Text("現在のファイル: \(AppOperation.bytes(completed)) / \(AppOperation.bytes(total))")
+                        }
+                        if let index = operation.chunkIndex, let count = operation.chunkCount, let size = operation.chunkSize {
+                            Text("チャンク \(index) / \(count) · \(AppOperation.bytes(size))単位")
+                        }
+                        Spacer()
+                        if let rate = operation.bytesPerSecond {
+                            Text("\(AppOperation.bytes(Int64(rate)))/秒")
+                        }
                     }
-                    if let index = operation.chunkIndex, let count = operation.chunkCount, let size = operation.chunkSize {
-                        Text("チャンク \(index) / \(count) · \(AppOperation.bytes(size))単位")
-                    }
-                    Spacer()
-                    if let rate = operation.bytesPerSecond {
-                        Text("\(AppOperation.bytes(Int64(rate)))/秒")
-                    }
-                }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }.font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
             Divider()
             HStack {

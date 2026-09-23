@@ -199,7 +199,10 @@ async def file_hash(afc, path, reporter=None):
     return digest.hexdigest()
 
 
-async def pull(afc, remote, local, reporter, verified_hashes=None, verify=True):
+async def pull(afc, remote, local, reporter, verified_hashes=None, verify=True, *, issues=None, _relative=""):
+    # Only backups opt into retaining readable files after an AFC open refusal.
+    # Downloads and the pull-before-rename path must remain all-or-nothing.
+    reporter.check()
     local = Path(local)
     info = await afc.stat(remote)
     kind = info["st_ifmt"]
@@ -212,11 +215,24 @@ async def pull(afc, remote, local, reporter, verified_hashes=None, verify=True):
             if "/" in name or not relative(name):
                 raise ValueError("端末のファイル名が不正です。")
             reporter.progress("取得: " + name)
-            await pull(afc, posixpath.join(remote, name), local / name, reporter, verified_hashes, verify)
+            await pull(afc, posixpath.join(remote, name), local / name, reporter, verified_hashes, verify,
+                       issues=issues, _relative=posixpath.join(_relative, name))
         if names != sorted(await afc.listdir(remote)):
             raise IOError("バックアップ中にフォルダの内容が変わりました。再試行してください。")
     elif kind == "S_IFREG":
-        handle = await afc.fopen(remote, "r")
+        try:
+            handle = await afc.fopen(remote, "r")
+        except OSError as error:
+            path = _relative or posixpath.basename(remote)
+            # AFC UNKNOWN_ERROR (1) and PERM_DENIED (10) can be returned
+            # for individual protected files even when stat succeeds.
+            # Never swallow disconnects, timeouts, local disk errors or
+            # read failures after a file has been opened.
+            if issues is None or getattr(error, "status", None) not in (1, 10):
+                raise IOError(f"ファイルを開けません: {path}: {error}") from error
+            issues.append({"path": path, "error": str(error)})
+            reporter.progress(f"スキップ（未取得）: {path}: {error}", force=True, phase="warning")
+            return
         count, digest = 0, hashlib.sha256()
         try:
             with local.open("xb") as stream:

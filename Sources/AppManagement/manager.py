@@ -195,6 +195,7 @@ async def backup(request, reporter):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     verified_hashes = {}
+                    file_issues = []
                     prefix = f"{index}:"
                     reporter.begin(prefix + "connect")
                     async with transport.Lease(request["device"], item["path"], reporter, afc, step_prefix=prefix) as lease:
@@ -206,8 +207,10 @@ async def backup(request, reporter):
                         reporter.begin(prefix + "transfer", needed)
                         # The received digest is retained even when verification
                         # is disabled, so future restores can validate the backup.
-                        await transport.pull(afc, lease.root, destination, reporter, verified_hashes, verify=False)
-                        reporter.end()
+                        await transport.pull(afc, lease.root, destination, reporter, verified_hashes, verify=False,
+                                             issues=file_issues)
+                        reporter.end("failed" if file_issues else "complete")
+                        needed = sum(value[0] for value in verified_hashes.values())
                         if verify:
                             reporter.begin(prefix + "verify", needed)
                             entries = storage.inventory(destination, reporter)
@@ -218,8 +221,11 @@ async def backup(request, reporter):
                         else:
                             reporter.skip(prefix + "verify")
                             entries = storage.inventory(destination, reporter, verified_hashes)
-                    manifest["regions"].append({**item, "folder": storage.region_folder(item), "entries": entries})
-                    reporter.progress("領域の保存完了: " + item["name"], force=True, phase="manifest")
+                    manifest["regions"].append({**item, "folder": storage.region_folder(item), "entries": entries,
+                                                "issues": file_issues})
+                    manifest["issues"].extend(f'{item["name"]}: {issue["path"]}: {issue["error"]}' for issue in file_issues)
+                    message = "領域の一部を保存（未取得あり）: " if file_issues else "領域の保存完了: "
+                    reporter.progress(message + item["name"], force=True, phase="manifest")
                 except Exception as error:
                     reporter.fail_remaining(f"{index}:")
                     from common import Cancelled
@@ -260,6 +266,8 @@ async def restore(request, reporter):
         target = next((r for r in app["regions"] if r["id"] == target_id), None)
         if not source or not target or source["kind"] != target["kind"] or source["kind"] == "bundle":
             raise ValueError("復元先の領域の組み合わせが不正です。")
+        if source.get("issues") and request.get("mode", "replace") == "replace":
+            raise ValueError("未取得ファイルを含む領域は置換復元できません。既存ファイルを残すマージ復元を選択してください。")
         plan.append((source, target))
     reporter.plan(operation_steps([target for _, target in plan]))
     reporter.begin("prepare")
