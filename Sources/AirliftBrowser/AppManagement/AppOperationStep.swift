@@ -14,11 +14,11 @@ struct AppOperationStep: Decodable, Identifiable, Sendable {
     }
     var stateLabel: String {
         switch state {
-        case "complete": "完了"
-        case "skipped": "スキップ"
-        case "running": "実行中"
-        case "failed": "中断"
-        default: "待機中"
+        case "complete": String(localized: "完了")
+        case "skipped": String(localized: "スキップ")
+        case "running": String(localized: "実行中")
+        case "failed": String(localized: "中断")
+        default: String(localized: "待機中")
         }
     }
     var symbol: String {

@@ -36,7 +36,7 @@ final class AppFinderFilePromise: NSObject, NSFilePromiseProviderDelegate {
             do {
                 try await finderExportQueue.run {
                     guard !FileManager.default.fileExists(atPath: url.path) else {
-                        throw AppServiceError("「\(url.lastPathComponent)」は保存先に既にあります。上書きしません。")
+                        throw AppServiceError(String(localized: "「\(url.lastPathComponent)」は保存先にすでにあるため、上書きしませんでした。"))
                     }
                     _ = try await AppService.call(request) { response in
                         notify(.progress(response))

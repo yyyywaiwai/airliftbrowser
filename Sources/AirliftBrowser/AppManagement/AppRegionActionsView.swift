@@ -3,13 +3,13 @@ import SwiftUI
 struct AppRegionActionsView: View {
     let manager: AppManager
     let kind: String
-    let title: String
+    let title: LocalizedStringKey
 
     var body: some View {
         let regions = manager.regions.filter { $0.kind == kind }
         Section(title) {
             if regions.isEmpty {
-                Text("取得可能な領域がありません").foregroundStyle(.secondary)
+                Text("このアプリにはありません").foregroundStyle(.secondary)
             } else {
                 ForEach(regions) { region in
                     AppActionRow(title: region.name, systemImage: region.symbol) {

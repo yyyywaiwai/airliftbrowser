@@ -41,21 +41,21 @@ private struct BrowserView: View {
 
     private var deleteTitle: String {
         if deleting.count == 1, let name = deleting.first?.name {
-            return "「\(name)」を削除しますか？"
+            return String(localized: "「\(name)」を削除しますか？")
         }
-        return "\(max(deleting.count, 1)) 項目を削除しますか？"
+        return String(localized: "\(max(deleting.count, 1)) 項目を削除しますか？")
     }
 
     private var deleteMessage: String {
         let folders = deleting.contains { $0.isDirectory }
         if browser.scope == .system {
             return folders
-                ? "AirTrafficでMediaへ回収してから完全に削除します。フォルダは中身ごと消えます。元に戻せません。"
-                : "AirTrafficでMediaへ回収してから完全に削除します。元に戻せません。"
+                ? String(localized: "完全に削除します。フォルダは中の項目ごと消えます。元には戻せません。")
+                : String(localized: "完全に削除します。元には戻せません。")
         }
         return folders
-            ? "ゴミ箱には移動しません。フォルダは中身ごと削除します。"
-            : "ゴミ箱には移動しません。"
+            ? String(localized: "ゴミ箱には入りません。フォルダは中の項目ごと削除します。")
+            : String(localized: "ゴミ箱には入りません。")
     }
 
     private var visibleCards: [PayCard] {
@@ -70,11 +70,11 @@ private struct BrowserView: View {
                 Label("AIRLIFT", systemImage: "externaldrive.connected.to.line.below")
                     .font(.headline).tracking(2).padding(20)
                 List(selection: Binding(get: { browser.deviceID }, set: { browser.connect($0) })) {
-                    Section("USB デバイス") {
+                    Section("デバイス") {
                         ForEach(browser.devices) { device in
                             VStack(alignment: .leading, spacing: 5) {
                                 Label(device.name, systemImage: device.product.hasPrefix("iPad") ? "ipad" : "iphone")
-                                Text("\(device.transport) · \(device.version)")
+                                Text(verbatim: (device.product.hasPrefix("iPad") ? "iPadOS " : "iOS ") + device.version)
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(.vertical, 5).tag(device.id)
                         }
@@ -82,25 +82,25 @@ private struct BrowserView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("場所").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    locationButton("アプリ", icon: "square.grid.2x2", hint: "アプリのコンテナ管理\nアプリのデータ・App Group・本体を閲覧し、Macにバックアップします。", selected: appSection == "apps") {
+                    locationButton("アプリ", icon: "square.grid.2x2", hint: "アプリのデータを表示したり、Macにバックアップしたりできます。", selected: appSection == "apps") {
                         appSection = "apps"
                     }
-                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したバックアップのファイルを管理し、端末へリストアできます。", selected: appSection == "backups") {
+                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したバックアップを開いたり、デバイスに復元したりできます。", selected: appSection == "backups") {
                         appSection = "backups"
                     }
-                    locationButton("Media", icon: "externaldrive", hint: "AFCで公開されるMedia領域のファイルを閲覧・操作します。", selected: appSection == "legacy" && browser.scope == .media) {
+                    locationButton("Media", icon: "externaldrive", hint: "写真や音楽などが入っているMediaフォルダのファイルを表示・操作します。", selected: appSection == "legacy" && browser.scope == .media) {
                         appSection = "legacy"
                         browser.showMedia()
                     }
-                    locationButton("Apple Pay", icon: "creditcard", hint: "Walletのカード名・下4桁・券面画像を表示します。読み出したデータは端末へ戻します。", selected: appSection == "legacy" && browser.scope == .cards) {
+                    locationButton("Apple Pay", icon: "creditcard", hint: "Walletに追加したカードの画像を表示し、差し替えられます。", selected: appSection == "legacy" && browser.scope == .cards) {
                         appSection = "legacy"
                         browser.showCards()
                     }
                 }.padding(.horizontal, 12).padding(.bottom, 8)
                 VStack(alignment: .leading, spacing: 8) {
-                    Button("USB端末を再検索", systemImage: "arrow.triangle.2.circlepath") { browser.scan() }
+                    Button("デバイスを再検索", systemImage: "arrow.triangle.2.circlepath") { browser.scan() }
                         .padding(.top, 6)
-                    Button("AirTraffic PoCを実行…", systemImage: "lock.open.trianglebadge.exclamationmark") {
+                    Button("書き込みテスト…", systemImage: "lock.open.trianglebadge.exclamationmark") {
                         showPoC = true
                     }
                     .buttonStyle(.borderedProminent)
@@ -132,10 +132,10 @@ private struct BrowserView: View {
                         .labelStyle(.iconOnly).disabled(!browser.canGoForward)
                     Button("上のフォルダ", systemImage: "arrow.up") { browser.goUp() }
                         .labelStyle(.iconOnly).disabled(!browser.canGoUp || browser.scope == .cards)
-                    Text(browser.scope == .cards ? "Apple Pay" : browser.scope == .system ? "Device" : "Media")
+                    Text(browser.scope == .cards ? "Apple Pay" : browser.scope == .system ? "デバイス" : "Media")
                         .font(.callout.weight(.semibold))
                     if browser.scope == .cards {
-                        Text("Walletの券面です。名前、下4桁、画像だけを表示し、読み出し後に端末へ戻します。")
+                        Text("Walletに追加したカードの画像です。")
                             .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if browser.scope == .system {
@@ -152,8 +152,8 @@ private struct BrowserView: View {
                 }.padding(14)
                 Divider()
                 if browser.deviceID == nil {
-                    ContentUnavailableView("USBデバイスを接続", systemImage: "cable.connector",
-                        description: Text("iPad / iPhoneのロックを解除し、このMacを信頼してから再検索してください。"))
+                    ContentUnavailableView("iPhoneまたはiPadを接続してください", systemImage: "cable.connector",
+                        description: Text("ケーブルでつないでロックを解除し、「このコンピュータを信頼」を選んでから再検索してください。"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if browser.scope == .cards {
                     cardBrowser
@@ -256,10 +256,10 @@ private struct BrowserView: View {
                             if visibleEntries.isEmpty && !browser.busy && browser.pending.isEmpty {
                                 ContentUnavailableView(
                                     search.isEmpty
-                                        ? (browser.notice == nil ? "このフォルダは空です" : "子項目名を列挙できません")
+                                        ? (browser.notice == nil ? "このフォルダは空です" : "このフォルダの中身は表示できません")
                                         : "一致する項目はありません",
                                     systemImage: search.isEmpty ? "folder.badge.questionmark" : "magnifyingglass",
-                                    description: Text(browser.notice ?? "Finderからファイルをドロップできます。"))
+                                    description: Text(browser.notice ?? String(localized: "Finderからファイルをドロップして追加できます。")))
                                     .allowsHitTesting(false)
                             }
                         }
@@ -278,11 +278,13 @@ private struct BrowserView: View {
                     Text(browser.status).lineLimit(1)
                     Spacer()
                     if !browser.selection.isEmpty && browser.scope != .cards {
-                        Text("\(browser.selection.count) 選択")
+                        Text("\(browser.selection.count) 項目を選択中")
                     }
                     Text(browser.scope == .cards ? "\(visibleCards.count) 枚" : "\(visibleEntries.count) 項目")
-                    Text(browser.scope == .cards ? "券面のみ · 下4桁" : browser.scope == .system ? "ドラッグで送受信" : "ドラッグで送受信 · 128 MiB")
-                        .foregroundStyle(.tertiary)
+                    if browser.scope != .cards {
+                        Text(browser.scope == .system ? "ドラッグでファイルを送受信" : "ドラッグでファイルを送受信（128 MBまで）")
+                            .foregroundStyle(.tertiary)
+                    }
                 }.font(.caption).foregroundStyle(.secondary).padding(12)
             }
             .onDeleteCommand {
@@ -298,10 +300,10 @@ private struct BrowserView: View {
                     Button("更新", systemImage: "arrow.clockwise") { browser.reload() }
                         .keyboardShortcut("r").disabled(browser.deviceID == nil || browser.blocksNewWork)
                     if browser.scope != .cards {
-                    Button("フォルダ作成", systemImage: "folder.badge.plus") {
+                    Button("新規フォルダ", systemImage: "folder.badge.plus") {
                         naming = NameRequest(entry: nil)
                     }.disabled(browser.deviceID == nil || browser.blocksNewWork)
-                    Button("送信", systemImage: "square.and.arrow.up") { browser.upload() }
+                    Button("追加", systemImage: "square.and.arrow.up") { browser.upload() }
                         .disabled(browser.deviceID == nil || browser.blocksNewWork)
                     Button("Macに保存", systemImage: "square.and.arrow.down") { browser.download() }
                         .disabled(browser.blocksNewWork || browser.selectedEntries.isEmpty
@@ -315,7 +317,7 @@ private struct BrowserView: View {
                     .disabled(browser.blocksNewWork || browser.selectedEntries.isEmpty
                               || browser.selectedEntries.contains { !browser.canDelete($0) })
                     if browser.scope == .system {
-                        Button("このフォルダを検証", systemImage: "checkmark.shield") {
+                        Button("このフォルダをテスト", systemImage: "checkmark.shield") {
                             showPoC = true
                         }
                     }
@@ -346,17 +348,17 @@ private struct BrowserView: View {
             PoCView(browser: browser,
                     initialTarget: browser.scope == .system ? browser.path : "/var/mobile/Documents")
         }
-        .confirmationDialog("元の券面に戻しますか？", isPresented: Binding(
+        .confirmationDialog("元のカード画像に戻しますか？", isPresented: Binding(
             get: { restoringCard != nil },
             set: { if !$0 { restoringCard = nil } }
         ), titleVisibility: .visible) {
-            Button("Appleの画像を戻す") {
+            Button("元に戻す") {
                 if let card = restoringCard { browser.restoreCard(card) }
                 restoringCard = nil
             }
             Button("キャンセル", role: .cancel) { restoringCard = nil }
         } message: {
-            Text("端末に保存されている元画像のURLから取得し、今の券面と入れ替えます。")
+            Text("元の画像をダウンロードして、今の画像と入れ替えます。")
         }
         .confirmationDialog(deleteTitle, isPresented: $showDelete, titleVisibility: .visible) {
             Button("削除", role: .destructive) {
@@ -373,12 +375,12 @@ private struct BrowserView: View {
     private var cardBrowser: some View {
         Group {
             if browser.busy && browser.cards.isEmpty {
-                ProgressView("Apple Payの券面を読み込んでいます")
+                ProgressView("カードを読み込んでいます…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if visibleCards.isEmpty {
-                ContentUnavailableView("支払いカードはありません", systemImage: "creditcard",
+                ContentUnavailableView("カードがありません", systemImage: "creditcard",
                     description: Text(search.isEmpty
-                        ? "この端末のWalletに支払いカードがありません。"
+                        ? "このデバイスのWalletにカードが追加されていません。"
                         : "一致するカードはありません。"))
             } else {
                 ScrollView {
@@ -396,8 +398,8 @@ private struct BrowserView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 HStack {
-                                    Button("差し替え") { pickReplacement(for: card) }
-                                    Button("元の画像") { restoringCard = card }
+                                    Button("画像を差し替え") { pickReplacement(for: card) }
+                                    Button("元に戻す") { restoringCard = card }
                                 }
                                 .disabled(card.assets.isEmpty || browser.busy)
                                 Button("Macに保存") { browser.saveOriginalCard(card) }
@@ -435,7 +437,7 @@ private struct BrowserView: View {
         panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff, .pdf]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "券面いっぱいに切り取って、このカードへ書き込みます。"
+        panel.message = String(localized: "カードの形に合わせて切り取り、このカードの画像にします。")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         browser.replaceCard(card, with: url)
     }
@@ -444,7 +446,7 @@ private struct BrowserView: View {
         naming = NameRequest(entry: entry)
     }
 
-    private func locationButton(_ title: String, icon: String, hint: String, selected: Bool,
+    private func locationButton(_ title: LocalizedStringKey, icon: String, hint: LocalizedStringKey, selected: Bool,
                                 action: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button(action: action) {
@@ -457,7 +459,7 @@ private struct BrowserView: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(.secondary)
                 .help(hint)
-                .accessibilityLabel("\(title)の説明")
+                .accessibilityLabel(title)
                 .accessibilityValue(hint)
         }
         .padding(.horizontal, 8)
@@ -495,20 +497,20 @@ private struct PoCView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("AirTraffic サンドボックス境界検証", systemImage: "lock.open.trianglebadge.exclamationmark")
+            Label("書き込みテスト", systemImage: "lock.open.trianglebadge.exclamationmark")
                 .font(.title2.bold())
-            Text("指定ディレクトリへランダムなcanaryを新規作成し、Mediaへ回収して完全一致を確認した後、canaryと一時データを削除します。既存ファイルは対象にしません。")
+            Text("指定したフォルダにテスト用のファイルを作り、正しく読み戻せるか確認してから削除します。すでにあるファイルには触れません。")
                 .foregroundStyle(.secondary)
-            TextField("絶対ディレクトリパス", text: $target)
+            TextField("フォルダのパス（/から始まる）", text: $target)
                 .textFieldStyle(.roundedBorder)
                 .disabled(browser.busy)
             if let result = browser.pocResult {
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                    GridRow { Text("対象").foregroundStyle(.secondary); Text(result.targetDirectory ?? "—") }
-                    GridRow { Text("生成ファイル").foregroundStyle(.secondary); Text(result.generatedLeaf ?? "—") }
-                    GridRow { Text("バイト数").foregroundStyle(.secondary); Text(result.payloadLength.map(String.init) ?? "—") }
+                    GridRow { Text("フォルダ").foregroundStyle(.secondary); Text(result.targetDirectory ?? "—") }
+                    GridRow { Text("テストファイル").foregroundStyle(.secondary); Text(result.generatedLeaf ?? "—") }
+                    GridRow { Text("サイズ（バイト）").foregroundStyle(.secondary); Text(result.payloadLength.map(String.init) ?? "—") }
                     GridRow { Text("SHA-256").foregroundStyle(.secondary); Text(result.payloadSHA256 ?? "—").font(.system(.caption, design: .monospaced)) }
-                    GridRow { Text("読み戻し").foregroundStyle(.secondary); Label(result.exactBytesRecovered == true ? "完全一致" : "未確認", systemImage: result.exactBytesRecovered == true ? "checkmark.circle.fill" : "xmark.circle") }
+                    GridRow { Text("内容の一致").foregroundStyle(.secondary); Label(result.exactBytesRecovered == true ? "一致" : "確認できず", systemImage: result.exactBytesRecovered == true ? "checkmark.circle.fill" : "xmark.circle") }
                     GridRow { Text("後片付け").foregroundStyle(.secondary); Label(result.cleanupComplete == true ? "完了" : "未完了", systemImage: result.cleanupComplete == true ? "checkmark.circle.fill" : "exclamationmark.triangle") }
                 }
                 .textSelection(.enabled)
@@ -517,7 +519,7 @@ private struct PoCView: View {
                 if browser.busy { ProgressView(); Text(browser.status).foregroundStyle(.secondary) }
                 Spacer()
                 Button("閉じる") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("検証を実行") { browser.pocResult = nil; browser.runPoC(target: target) }
+                Button("テストを実行") { browser.pocResult = nil; browser.runPoC(target: target) }
                     .buttonStyle(.borderedProminent)
                     .disabled(browser.blocksNewWork || !target.hasPrefix("/") || target == "/")
             }
@@ -542,12 +544,12 @@ private struct NameEditor: View {
     init(request: NameRequest, save: @escaping (String) -> Void) {
         self.request = request
         self.save = save
-        self.name = request.entry?.name ?? "新しいフォルダ"
+        self.name = request.entry?.name ?? String(localized: "新規フォルダ")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(request.entry == nil ? "新しいフォルダ" : "名前を変更").font(.headline)
+            Text(request.entry == nil ? "新規フォルダ" : "名前を変更").font(.headline)
             TextField("名前", text: $name).textFieldStyle(.roundedBorder)
                 .onSubmit { if !name.isEmpty { save(name) } }
             HStack {

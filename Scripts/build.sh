@@ -85,11 +85,14 @@ xcrun actool \
   --output-partial-info-plist "$ICON_OUT/partial.plist" \
   "$PWD/AirliftBrowser.icon" >/dev/null
 cp "$ICON_OUT/AirliftBrowser.icns" "$ICON_OUT/Assets.car" "$APP/Contents/Resources/"
+xcrun xcstringstool compile Localization/Localizable.xcstrings --output-directory "$APP/Contents/Resources"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Airlift Browser</string>
+<key>CFBundleDevelopmentRegion</key><string>ja</string>
+<key>CFBundleLocalizations</key><array><string>ja</string><string>en</string><string>zh-Hans</string></array>
 <key>CFBundleDisplayName</key><string>Airlift Browser</string>
 <key>CFBundleIdentifier</key><string>local.airlift.browser</string>
 <key>CFBundleExecutable</key><string>AirliftBrowser</string>

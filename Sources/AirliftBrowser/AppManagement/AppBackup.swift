@@ -23,9 +23,9 @@ struct AppBackup: Decodable, Identifiable, Hashable, Sendable {
 
     var statusLabel: String {
         switch status {
-        case "complete": "保存済み"
-        case "partial": "一部未取得"
-        default: "未完了"
+        case "complete": String(localized: "保存済み")
+        case "partial": String(localized: "一部を保存できず")
+        default: String(localized: "未完了")
         }
     }
 }

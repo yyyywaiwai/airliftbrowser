@@ -42,7 +42,7 @@ static NSDictionary *DiscoverDevices(void) {
         &subscription, (__bridge CFDictionaryRef)options);
     if (!status) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
     if (subscription) AMDeviceNotificationUnsubscribe(subscription);
-    return status ? Failure(@"USB端末の検出に失敗しました。")
+    return status ? Failure(@"Couldn't find a connected device.")
                   : @{ @"ok": @YES, @"devices": Devices.allValues };
 }
 
@@ -68,10 +68,10 @@ static BOOL Traversable(AFCConnectionRef afc, NSString *path, BOOL includeLeaf) 
 }
 
 static NSDictionary *List(AFCConnectionRef afc, NSString *path) {
-    if (!Traversable(afc, path, YES)) return Failure(@"フォルダが見つからないか、リンク先です。");
+    if (!Traversable(afc, path, YES)) return Failure(@"The folder doesn't exist or is a link.");
     AFCDirectoryRef directory = NULL;
     int status = AFCDirectoryOpen(afc, path.fileSystemRepresentation, &directory);
-    if (status || !directory) return Failure(@"フォルダを開けませんでした。");
+    if (status || !directory) return Failure(@"Couldn't open the folder.");
     NSMutableArray *entries = NSMutableArray.array;
     char *raw = NULL;
     while ((status = AFCDirectoryRead(afc, directory, &raw)) == 0 && raw) {
@@ -83,7 +83,7 @@ static NSDictionary *List(AFCConnectionRef afc, NSString *path) {
                               @"size": @(AFCFileSize(afc, child)) }];
     }
     int closed = AFCDirectoryClose(afc, directory);
-    if (status || closed) return Failure(@"一覧の読み込みが中断されました。再接続してください。");
+    if (status || closed) return Failure(@"Loading the list was interrupted. Please reconnect.");
     return @{ @"ok": @YES, @"entries": entries };
 }
 
@@ -103,25 +103,25 @@ static NSDictionary *FinishWrite(AFCConnectionRef afc, NSArray<NSString *> *args
         IsSafeRelativePath(targetTail) && IsSafeRelativePath(leaf) &&
         [leaf rangeOfString:@"/"].location == NSNotFound &&
         leaf.length <= 255 && expected.length <= TransferLimit && snapshot != nil;
-    if (!safe) return Failure(@"書込み後処理の引数を検証できませんでした。");
+    if (!safe) return Failure(@"Couldn't verify the details needed to finish copying.");
 
     BOOL restoredToTarget = !AFCExists(afc, recovered);
     NSMutableArray *failures = NSMutableArray.array;
-    if (!RemoveIfPresent(afc, link)) [failures addObject:@"一時リンク"];
-    if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"展開ディレクトリ"];
+    if (!RemoveIfPresent(afc, link)) [failures addObject:@"temporary link"];
+    if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"temporary folder"];
     usleep(200000);
     NSDictionary *restore = RestoreBooksState(afc, snapshotRoot);
-    if (![restore[@"ok"] boolValue]) [failures addObject:@"Books同期状態"];
+    if (![restore[@"ok"] boolValue]) [failures addObject:@"Books sync state"];
     BOOL cleanup = failures.count == 0;
     if (!restoredToTarget)
         return @{ @"ok": @NO,
                   @"error": [NSString stringWithFormat:
-                      @"対象への最終配置を確認できませんでした。回収データをMedia/%@に保持しています。", recovered],
+                      @"Couldn't confirm the item reached its destination. The recovered data is kept in Media/%@.", recovered],
                   @"cleanupComplete": @(cleanup) };
     return cleanup
         ? @{ @"ok": @YES, @"bytes": @(expected.length), @"cleanupComplete": @YES }
         : @{ @"ok": @NO,
-             @"error": [NSString stringWithFormat:@"書込みは完了しましたが後片付けに失敗: %@",
+             @"error": [NSString stringWithFormat:@"The file was copied, but cleanup failed: %@",
                          [failures componentsJoinedByString:@", "]],
              @"bytesMatch": @YES, @"cleanupComplete": @NO };
 }
@@ -172,7 +172,7 @@ static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *arg
     BOOL cleanupOnly = [mode isEqual:@"cleanup"];
     BOOL safe = GeneratedNamesMatch(source, link, recovered) && snapshot != nil &&
         (deleteRequested || cleanupOnly);
-    if (!safe) return Failure(@"削除後処理の引数を検証できませんでした。");
+    if (!safe) return Failure(@"Couldn't verify the details needed to finish deleting.");
 
     NSString *kind = AFCFileKind(afc, recovered);
     BOOL deleted = NO;
@@ -183,28 +183,28 @@ static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *arg
     }
     BOOL settled = deleteRequested ? deleted : !AFCExists(afc, recovered);
     NSMutableArray *failures = NSMutableArray.array;
-    if (!RemoveIfPresent(afc, link)) [failures addObject:@"一時リンク"];
-    if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"展開ディレクトリ"];
+    if (!RemoveIfPresent(afc, link)) [failures addObject:@"temporary link"];
+    if (!RemoveGeneratedTree(afc, source, 0)) [failures addObject:@"temporary folder"];
     usleep(200000);
     NSDictionary *restore = RestoreBooksState(afc, snapshotRoot);
-    if (![restore[@"ok"] boolValue]) [failures addObject:@"Books同期状態"];
+    if (![restore[@"ok"] boolValue]) [failures addObject:@"Books sync state"];
     BOOL cleanup = failures.count == 0;
     if (!settled)
         return @{ @"ok": @NO,
                   @"error": [NSString stringWithFormat:
-                      @"対象を確定できませんでした。回収できたデータはMedia/%@に保持しています。", recovered],
+                      @"Couldn't confirm the item's final state. Any recovered data is kept in Media/%@.", recovered],
                   @"deleted": @NO, @"cleanupComplete": @(cleanup) };
     if (cleanupOnly)
         return cleanup
             ? @{ @"ok": @YES, @"deleted": @NO, @"targetAbsent": @NO,
                  @"cleanupComplete": @YES }
-            : @{ @"ok": @NO, @"error": @"復元後の後片付けに失敗しました。",
+            : @{ @"ok": @NO, @"error": @"Cleanup after restoring failed.",
                  @"deleted": @NO, @"cleanupComplete": @NO };
     return cleanup
         ? @{ @"ok": @YES, @"deleted": @YES, @"targetAbsent": @YES,
              @"cleanupComplete": @YES }
         : @{ @"ok": @NO,
-             @"error": [NSString stringWithFormat:@"削除は完了しましたが後片付けに失敗: %@",
+             @"error": [NSString stringWithFormat:@"The item was deleted, but cleanup failed: %@",
                          [failures componentsJoinedByString:@", "]],
              @"deleted": @YES, @"targetAbsent": @YES, @"cleanupComplete": @NO };
 }
@@ -212,24 +212,24 @@ static NSDictionary *FinishDelete(AFCConnectionRef afc, NSArray<NSString *> *arg
 static NSDictionary *VerifyRecovered(AFCConnectionRef afc, NSString *path,
                                      NSString *expectedPath) {
     if (!GeneratedToken(path, AIRLIFT_RECOVERED_PREFIX))
-        return Failure(@"回収ファイル名を検証できませんでした。");
+        return Failure(@"Couldn't verify the recovered file name.");
     NSData *expected = [NSData dataWithContentsOfFile:expectedPath];
     if (!expected || expected.length > TransferLimit)
-        return Failure(@"照合元ファイルを読み込めませんでした。");
+        return Failure(@"Couldn't read the original file for comparison.");
     NSData *observed = AFCReadFileWithLimit(afc, path, TransferLimit);
     return observed && [observed isEqualToData:expected]
         ? @{ @"ok": @YES, @"bytes": @(observed.length) }
-        : Failure(@"回収したファイルが元データと一致しませんでした。");
+        : Failure(@"The recovered file doesn't match the original.");
 }
 
 static NSDictionary *WaitRecovered(AFCConnectionRef afc, NSString *path, NSString *mode) {
     if (!GeneratedToken(path, AIRLIFT_RECOVERED_PREFIX))
-        return Failure(@"回収ファイル名を検証できませんでした。");
+        return Failure(@"Couldn't verify the recovered file name.");
     BOOL wantAbsent = [mode isEqual:@"absent"];
     BOOL wantDirectory = [mode isEqual:@"directory"];
     BOOL wantFile = [mode isEqual:@"file"];
     if (!wantAbsent && !wantDirectory && !wantFile)
-        return Failure(@"回収データの待ち方が不正です。");
+        return Failure(@"Invalid wait mode for recovered data.");
     for (NSUInteger attempt = 0; attempt < 80; attempt++) {
         BOOL exists = AFCExists(afc, path);
         NSString *kind = exists ? AFCFileKind(afc, path) : nil;
@@ -239,84 +239,84 @@ static NSDictionary *WaitRecovered(AFCConnectionRef afc, NSString *path, NSStrin
         if (ready) return @{ @"ok": @YES, @"attempts": @(attempt + 1), @"kind": kind ?: @"" };
         usleep(50000);
     }
-    return Failure(@"回収データの状態が変わる前に時間切れになりました。");
+    return Failure(@"Timed out waiting for the recovered data.");
 }
 
 static NSDictionary *GeneratedExists(AFCConnectionRef afc, NSString *path) {
     BOOL safe = GeneratedToken(path, AIRLIFT_RECOVERED_PREFIX) != nil;
     return safe ? @{ @"ok": @YES, @"exists": @(AFCExists(afc, path)) }
-                : Failure(@"生成ファイル名を検証できませんでした。");
+                : Failure(@"Couldn't verify the generated file name.");
 }
 
 static NSDictionary *GeneratedKind(AFCConnectionRef afc, NSString *path) {
     if (!GeneratedToken(path, AIRLIFT_RECOVERED_PREFIX))
-        return Failure(@"生成ファイル名を検証できませんでした。");
+        return Failure(@"Couldn't verify the generated file name.");
     NSString *kind = AFCFileKind(afc, path);
     return kind ? @{ @"ok": @YES, @"kind": kind }
-                : Failure(@"回収対象を確認できませんでした。");
+                : Failure(@"Couldn't check the recovered item.");
 }
 
 static NSDictionary *Operate(AFCConnectionRef afc, NSString *command, NSString *path, NSString *argument) {
-    if (!ValidPath(path)) return Failure(@"不正なMedia相対パスです。");
+    if (!ValidPath(path)) return Failure(@"Invalid path in Media.");
     if ([command isEqual:@"list"]) return List(afc, path);
     if ([path isEqual:@"/"] || !Traversable(afc, path, NO))
-        return Failure(@"Mediaルートやリンク経由の操作は対象外です。");
+        return Failure(@"The Media folder itself and items reached through links can't be changed.");
     NSString *kind = AFCFileKind(afc, path);
     if ([command isEqual:@"get"] && argument) {
-        if (![kind isEqual:@"S_IFREG"]) return Failure(@"通常ファイルを選択してください。");
+        if (![kind isEqual:@"S_IFREG"]) return Failure(@"Choose a file.");
         NSData *data = AFCReadFileWithLimit(afc, path, TransferLimit);
-        if (!data) return Failure(@"読み込み失敗、または128 MiBを超えています。");
+        if (!data) return Failure(@"Couldn't read the file, or it's larger than 128 MiB.");
         NSError *error = nil;
         if (![data writeToFile:argument options:NSDataWritingWithoutOverwriting error:&error])
             return Failure(error.localizedDescription);
         NSData *saved = [NSData dataWithContentsOfFile:argument];
         return [data isEqualToData:saved] ? @{ @"ok": @YES, @"bytes": @(data.length) }
-            : Failure(@"保存後の照合に失敗しました。保存先を確認してください。");
+            : Failure(@"The saved file doesn't match the original. Check the saved file.");
     }
     if ([command isEqual:@"put"] && argument) {
-        if (kind) return Failure(@"同名の項目があります。上書きせず別名で送信してください。");
+        if (kind) return Failure(@"An item with the same name already exists. Send it with a different name instead.");
         NSError *error = nil;
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:argument error:&error];
         if (!attributes) return Failure(error.localizedDescription);
         if (![attributes[NSFileType] isEqual:NSFileTypeRegular] || [attributes[NSFileSize] longLongValue] > TransferLimit)
-            return Failure(@"送信は128 MiB以下の通常ファイルが対象です。");
+            return Failure(@"Only files up to 128 MiB can be sent.");
         NSData *data = [NSData dataWithContentsOfFile:argument options:NSDataReadingMappedIfSafe error:&error];
-        if (!data || data.length > TransferLimit) return Failure(error.localizedDescription ?: @"サイズ上限を超えています。");
+        if (!data || data.length > TransferLimit) return Failure(error.localizedDescription ?: @"The file is too large.");
         NSString *temporary = [[path stringByDeletingLastPathComponent]
             stringByAppendingPathComponent:[@".airlift-upload-" stringByAppendingString:NSUUID.UUID.UUIDString]];
-        if (AFCExists(afc, temporary)) return Failure(@"一時ファイル名が衝突しました。");
+        if (AFCExists(afc, temporary)) return Failure(@"A temporary file name is already in use.");
         BOOL written = AFCWriteFile(afc, temporary, data);
         BOOL verified = written && [AFCReadFileWithLimit(afc, temporary, TransferLimit) isEqualToData:data];
         BOOL moved = verified && !AFCExists(afc, path) &&
             AFCRenamePath(afc, temporary.fileSystemRepresentation, path.fileSystemRepresentation) == 0;
         if (!moved) {
             BOOL cleaned = RemoveIfPresent(afc, temporary);
-            return Failure([NSString stringWithFormat:@"転送・照合が完了しませんでした。%@",
-                cleaned ? @"一時ファイルは削除済みです。" : [@"残った一時ファイル: " stringByAppendingString:temporary]]);
+            return Failure([NSString stringWithFormat:@"The transfer or verification didn't finish. %@",
+                cleaned ? @"The temporary file was removed." : [@"Leftover temporary file: " stringByAppendingString:temporary]]);
         }
         return @{ @"ok": @YES, @"bytes": @(data.length) };
     }
     if ([command isEqual:@"mkdir"]) {
-        if (kind) return Failure(@"同名の項目があります。");
+        if (kind) return Failure(@"An item with the same name already exists.");
         return AFCDirectoryCreate(afc, path.fileSystemRepresentation) == 0
-            ? @{ @"ok": @YES } : Failure(@"フォルダ作成に失敗しました。");
+            ? @{ @"ok": @YES } : Failure(@"Couldn't create the folder.");
     }
     if ([command isEqual:@"rename"] && argument) {
         if (!ValidPath(argument) || [argument isEqual:@"/"] || !Traversable(afc, argument, NO) || AFCExists(afc, argument))
-            return Failure(@"移動先が不正か、同名の項目があります。");
-        if (!kind || [kind isEqual:@"S_IFLNK"]) return Failure(@"対象が見つからないか、シンボリックリンクです。");
+            return Failure(@"Invalid destination, or an item with the same name already exists.");
+        if (!kind || [kind isEqual:@"S_IFLNK"]) return Failure(@"The item doesn't exist or is a symbolic link.");
         return AFCRenamePath(afc, path.fileSystemRepresentation, argument.fileSystemRepresentation) == 0
-            ? @{ @"ok": @YES } : Failure(@"名前変更に失敗しました。");
+            ? @{ @"ok": @YES } : Failure(@"Couldn't rename the item.");
     }
     if ([command isEqual:@"remove"]) {
         if (![kind isEqual:@"S_IFDIR"] && ![kind isEqual:@"S_IFREG"])
-            return Failure(@"通常ファイルまたはフォルダを選択してください。");
-        return RemoveMediaTree(afc, path, 0) ? @{ @"ok": @YES } : Failure(@"削除に失敗しました。");
+            return Failure(@"Choose a file or folder.");
+        return RemoveMediaTree(afc, path, 0) ? @{ @"ok": @YES } : Failure(@"Couldn't delete the item.");
     }
-    return Failure(@"不明な操作、または引数不足です。");
+    return Failure(@"Unknown action or missing details.");
 }
 
-// Wallet券面の表示に必要なファイルだけ。証明書やその他のパス内容はコピーしない。
+// Only the files needed to show Wallet card images. Certificates and other pass contents are never copied.
 static BOOL SafeCatalogName(NSString *name) {
     if (!name.length || name.length > 255) return NO;
     if ([name isEqual:@"."] || [name isEqual:@".."]) return NO;
@@ -422,21 +422,21 @@ static BOOL AcceptNewLocalDirectory(NSString *path) {
 
 static NSDictionary *PullCardCatalog(AFCConnectionRef afc, NSString *remoteName, NSString *localPath) {
     if (!GeneratedToken(remoteName, AIRLIFT_RECOVERED_PREFIX))
-        return Failure(@"回収ディレクトリ名を検証できませんでした。");
+        return Failure(@"Couldn't verify the recovered folder name.");
     if (![AFCFileKind(afc, remoteName) isEqual:@"S_IFDIR"])
-        return Failure(@"回収したCardsディレクトリが見つかりません。");
+        return Failure(@"Couldn't find the recovered Cards folder.");
     if (!AcceptNewLocalDirectory(localPath))
-        return Failure(@"カード一覧の保存先が不正か、既に存在します。");
+        return Failure(@"The save location for the card list is invalid or already exists.");
     BOOL scanned = NO;
     NSSet<NSString *> *cardIDs = PaymentCardIDs(afc, remoteName, &scanned);
-    if (!scanned) return Failure(@"Cardsディレクトリを読めませんでした。");
+    if (!scanned) return Failure(@"Couldn't read the Cards folder.");
     NSError *error = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:localPath withIntermediateDirectories:NO attributes:nil error:&error])
-        return Failure(error.localizedDescription ?: @"保存先を作成できませんでした。");
+        return Failure(error.localizedDescription ?: @"Couldn't create the save location.");
 
     BOOL listed = NO;
     NSArray<NSString *> *children = CatalogChildren(afc, remoteName, &listed);
-    if (!listed) return Failure(@"Cardsディレクトリの一覧が中断されました。");
+    if (!listed) return Failure(@"Listing the Cards folder was interrupted.");
     NSUInteger files = 0;
     unsigned long long bytes = 0;
     for (NSString *container in children) {
@@ -446,7 +446,7 @@ static NSDictionary *PullCardCatalog(AFCConnectionRef afc, NSString *remoteName,
         if (![AFCFileKind(afc, remoteContainer) isEqual:@"S_IFDIR"]) continue;
         BOOL childOK = NO;
         NSArray<NSString *> *inner = CatalogChildren(afc, remoteContainer, &childOK);
-        if (!childOK) return Failure(@"カード内の一覧が中断されました。");
+        if (!childOK) return Failure(@"Listing a card's contents was interrupted.");
         NSString *localContainer = [localPath stringByAppendingPathComponent:container];
         BOOL wroteDirectory = NO;
         for (NSString *file in inner) {
@@ -459,19 +459,19 @@ static NSDictionary *PullCardCatalog(AFCConnectionRef afc, NSString *remoteName,
             if (passJSON) data = data ? SanitizedPassJSON(data) : nil;
             if (!data) {
                 if (passJSON || urlsFile) continue;
-                return Failure(@"券面ファイルを読み出せませんでした。");
+                return Failure(@"Couldn't read a card image file.");
             }
             if (bytes + data.length > 128ULL * 1024 * 1024)
-                return Failure(@"券面ファイルがサイズ上限を超えました。");
+                return Failure(@"The card image files are too large.");
             if (!wroteDirectory) {
                 if (![NSFileManager.defaultManager createDirectoryAtPath:localContainer
                                                withIntermediateDirectories:NO attributes:nil error:&error])
-                    return Failure(error.localizedDescription ?: @"カードフォルダを作成できませんでした。");
+                    return Failure(error.localizedDescription ?: @"Couldn't create the card folder.");
                 wroteDirectory = YES;
             }
             if (![data writeToFile:[localContainer stringByAppendingPathComponent:file]
                            options:NSDataWritingWithoutOverwriting error:&error])
-                return Failure(error.localizedDescription ?: @"券面ファイルを保存できませんでした。");
+                return Failure(error.localizedDescription ?: @"Couldn't save a card image file.");
             files++;
             bytes += data.length;
         }
@@ -489,13 +489,13 @@ int main(int argc, const char *argv[]) {
             PrintJSON(result);
             return [result[@"ok"] boolValue] ? 0 : 1;
         }
-        if (argc < 4 || argc > 10) { PrintJSON(Failure(@"引数不足です。")); return 64; }
+        if (argc < 4 || argc > 10) { PrintJSON(Failure(@"Missing details.")); return 64; }
         TargetIdentifier = CFStringCreateWithCString(NULL, argv[2], kCFStringEncodingUTF8);
         DeviceSession session;
         OpenSession(&session);
         NSDictionary *result;
         if (!session.afc || session.afcStatus || AMDeviceGetInterfaceType(session.device) != 1) {
-            result = Failure(@"USB接続・ロック解除・『このコンピュータを信頼』を確認して再試行してください。");
+            result = Failure(@"Make sure your device is connected with a cable, unlocked, and set to 'Trust This Computer', then try again.");
         } else if (strcmp(argv[1], "finish-write") == 0 && argc == 10) {
             result = FinishWrite(session.afc, @[
                 @(argv[3]), @(argv[4]), @(argv[5]), @(argv[6]),

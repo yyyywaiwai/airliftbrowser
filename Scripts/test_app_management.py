@@ -254,7 +254,7 @@ class Acceptance(unittest.TestCase):
                 afc.path(destination).symlink_to(self.root, target_is_directory=True)
             try:
                 with patch.object(transport, "native", AsyncMock()), patch.object(transport, "relocate", AsyncMock(side_effect=link)) as relocate:
-                    with self.assertRaisesRegex(ValueError, "一覧の取得後"):
+                    with self.assertRaisesRegex(ValueError, "changed after the list"):
                         await lease.open()
                     self.assertEqual(relocate.await_count, 1)
                     self.assertNotIn("copiedSource", lease.state)
@@ -277,7 +277,7 @@ class Acceptance(unittest.TestCase):
                 afc.path(destination).symlink_to(self.root / parent, target_is_directory=True)
             try:
                 with patch.object(transport, "native", AsyncMock()), patch.object(transport, "relocate", AsyncMock(side_effect=link)) as relocate:
-                    with self.assertRaisesRegex(ValueError, "リンク先"):
+                    with self.assertRaisesRegex(ValueError, "through a link"):
                         await lease.open()
                     self.assertEqual(relocate.await_count, 1)
                     self.assertEqual(lease.state["phase"], "linking")
@@ -349,7 +349,7 @@ class Acceptance(unittest.TestCase):
                 self.assertFalse(destination.exists())
                 events = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(len(events), 1)
-                self.assertIn("スキップ（未取得）: source", events[0]["message"])
+                self.assertIn("Skipped (not copied): source", events[0]["message"])
                 self.assertIn(str(error), events[0]["message"])
 
             for status, tolerated in ((1, False), (10, False), (11, True), (12, True), (30, True)):
@@ -385,7 +385,7 @@ class Acceptance(unittest.TestCase):
             self.assertEqual((outside / "keep.txt").read_text(), "keep")
             events = [json.loads(line) for line in output.getvalue().splitlines()]
             self.assertEqual(events[-1]["phase"], "cleanup")
-            self.assertIn("4 項目", events[-1]["message"])
+            self.assertIn("4 items", events[-1]["message"])
         asyncio.run(run())
 
     def setUp(self):
@@ -435,7 +435,7 @@ class Acceptance(unittest.TestCase):
         backup = storage.import_backup(self.package(), self.reporter)
         base = Path(backup["path"])
         (base / "Payload/Data/Documents/日本語.txt").write_text("corrupted")
-        with self.assertRaisesRegex(ValueError, "一致しません"):
+        with self.assertRaisesRegex(ValueError, "doesn't match"):
             storage.load(base, verify=True)
         with self.assertRaises(ValueError):
             common.child(base, "../outside")
@@ -506,7 +506,7 @@ class Acceptance(unittest.TestCase):
             self.assertTrue(lease.state["copiedSource"])
             # Same path, different root metadata must not be treated as a copy.
             afc.path(lease.original_alias + "/new-item").write_bytes(b"changed")
-            with self.assertRaisesRegex(RuntimeError, "取得元の状態"):
+            with self.assertRaisesRegex(RuntimeError, "source changed"):
                 await lease.identify_copy()
             shutil.rmtree(lease.work)
         asyncio.run(run())
@@ -581,7 +581,7 @@ class Acceptance(unittest.TestCase):
             async def short_wait(**kwargs):
                 await real_wait(timeout=0, interval=0, **kwargs)
             with patch.object(lease, "wait_for_copy", short_wait):
-                with self.assertRaisesRegex(RuntimeError, "時間内に完了"):
+                with self.assertRaisesRegex(RuntimeError, "didn't finish in time"):
                     await lease.close()
             self.assertTrue(afc.path(lease.root).is_dir())
             self.assertTrue(afc.path(lease.original_alias).is_dir())
@@ -668,7 +668,7 @@ class Acceptance(unittest.TestCase):
             await manager.verify_restore(lease, source, "", "replace", expected)
             self.assertEqual(afc.bytes_read, len(b"backup contents"))
             old.write_bytes(b"corrupted contents")
-            with self.assertRaisesRegex(IOError, "内容が一致"):
+            with self.assertRaisesRegex(IOError, "doesn't match the backup"):
                 await manager.verify_restore(lease, source, "", "replace", expected)
             await lease.rollback()
             self.assertEqual(old.read_bytes(), b"original contents")
@@ -784,7 +784,7 @@ class Acceptance(unittest.TestCase):
                         patch.object(transport, "file_hash", side_effect=AssertionError("unexpected verification")), \
                         patch.object(storage, "sha256", side_effect=AssertionError("unexpected preflight verification")):
                     restored = await manager.restore(request, reporter)
-                self.assertIn("内容検証なし", restored["message"])
+                self.assertIn("not verified", restored["message"])
                 self.assertEqual(afc.bytes_read, 0)
                 self.assertEqual((live / "document").read_bytes(), b"backup payload")
                 self.assertEqual([s["id"] for s in reporter.steps if s["state"] == "skipped"], ["validate", "1:verify"])
@@ -826,7 +826,7 @@ class Acceptance(unittest.TestCase):
                     self.assertFalse((destination / blocked.relative_to(live)).exists())
                     self.assertEqual((destination / "document").read_bytes(), b"backup payload")
                     partial_request = {**request, "backupPath": partial["backup"]["path"]}
-                    with self.assertRaisesRegex(ValueError, "マージ復元"):
+                    with self.assertRaisesRegex(ValueError, "Add & Replace"):
                         await manager.restore(partial_request, QuietReporter())
                     with patch.object(afc, "get_device_info", AsyncMock(return_value={"FSFreeBytes": 1024**3}), create=True):
                         await manager.restore({**partial_request, "mode": "merge"}, QuietReporter())

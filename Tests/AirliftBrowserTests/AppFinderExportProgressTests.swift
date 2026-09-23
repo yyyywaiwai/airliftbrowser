@@ -21,7 +21,7 @@ struct AppFinderExportProgressTests {
         #expect(!manager.showOperation)
         let operationID = manager.operation?.id
         send(.progress(AppResponse(message: "取得: first.txt", completed: 50, total: 100, phase: "receive")))
-        #expect(manager.status == "取得: first.txt")
+        #expect(manager.status == "受信中")
         #expect(manager.fraction == 0.5)
         #expect(manager.operation?.completed == 50)
         #expect(manager.operation?.logs.contains { $0.message.contains("取得: first.txt") } == true)
@@ -40,7 +40,7 @@ struct AppFinderExportProgressTests {
         #expect(manager.error == "first.txt: テストエラー")
         #expect(!FileManager.default.fileExists(atPath: cancelURL.path))
         let log = try #require(manager.operation?.logURL)
-        #expect(try String(contentsOf: log, encoding: .utf8).contains("コピー完了: second.txt"))
+        #expect(try String(contentsOf: log, encoding: .utf8).contains("コピーしました: second.txt"))
     }
 
     @Test func completesSuccessfulExportAndIgnoresLateProgress() {

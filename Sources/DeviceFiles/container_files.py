@@ -265,10 +265,10 @@ def browse(device, path):
         base = f"{root}/{uuid}"
         row = next((row for row in rows if row["id"] == base), None)
         if not row:
-            raise ValueError("このコンテナはCoreDeviceから参照できません。")
+            raise ValueError("This container can't be accessed.")
         relative = path[len(base):].lstrip("/")
         return list_domain(device, domain, row["domainIdentifier"], base, relative)
-    raise ValueError("このディレクトリには動的な列挙サービスがありません。")
+    raise ValueError("This folder can't be listed.")
 
 
 def main():

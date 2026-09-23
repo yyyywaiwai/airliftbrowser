@@ -67,7 +67,7 @@ def target_present(device_id, parent, leaf):
 def bridge_call(args, timeout=120):
     reply = airlift.run_json([os.fspath(BRIDGE), *args], timeout=timeout)
     if reply.get("exitCode") or not reply.get("ok"):
-        raise airlift.AirLiftError(reply.get("error") or "端末ファイル処理に失敗しました。")
+        raise airlift.AirLiftError(reply.get("error") or "The file operation on the device failed.")
     return reply
 
 
@@ -79,7 +79,7 @@ def pull_tree(device_id, media_path, local_path):
         name, kind, child = entry.get("name"), entry.get("kind"), entry.get("id")
         if (not isinstance(name, str) or not isinstance(child, str) or name in (".", "..")
                 or "/" in name or "\x00" in name):
-            raise airlift.AirLiftError("回収したフォルダに不正な項目があります。")
+            raise airlift.AirLiftError("The recovered folder contains an invalid item.")
         destination = os.path.join(local_path, name)
         if kind == "S_IFDIR":
             total += pull_tree(device_id, child, destination)
@@ -87,7 +87,7 @@ def pull_tree(device_id, media_path, local_path):
             copied = bridge_call(["get", device_id, child, destination])
             total += int(copied.get("bytes") or 0)
         else:
-            raise airlift.AirLiftError(f"通常ファイルとフォルダ以外は抽出できません: {name}")
+            raise airlift.AirLiftError(f"Only files and folders can be extracted: {name}")
     return total
 
 
@@ -128,7 +128,7 @@ def delete_file(device_id, target, local_path=None):
     target = airlift.normalize_target(target)
     parent, leaf = posixpath.split(target)
     if not parent or not leaf or leaf in (".", ".."):
-        raise ValueError("削除対象パスが不正です。")
+        raise ValueError("Invalid path for deletion.")
     udid = airlift.resolve_device(device_id)["udid"]
     token = secrets.token_hex(10)
     source = f"{airlift.SOURCE_PREFIX}{token}"
@@ -177,7 +177,7 @@ def delete_file(device_id, target, local_path=None):
             kind = observed.get("kind")
             if observed.get("exitCode") or kind not in ("S_IFREG", "S_IFDIR"):
                 should_restore = True
-                type_error = "通常ファイルまたはフォルダだけ削除できます。対象は元の場所へ復元しました。"
+                type_error = "Only files and folders can be deleted. The item was put back in its original location."
             elif kind == "S_IFDIR" and local_path:
                 should_restore = True
                 try:
@@ -202,16 +202,16 @@ def delete_file(device_id, target, local_path=None):
                     "cleanup" if should_restore else "delete"], timeout=finish_timeout)
         if should_restore and not restored:
             raise airlift.AirLiftError(
-                f"対象を元へ復元できませんでした。回収データをMedia/{recovered}に保持しています。")
+                f"Couldn't put the item back. The recovered data is kept in Media/{recovered}.")
         if type_error:
             if not finish or finish.get("exitCode") or not finish.get("ok"):
                 raise airlift.AirLiftError((finish or {}).get("error", type_error))
             raise airlift.AirLiftError(type_error)
         if local_path:
             if not extracted or extracted.get("exitCode") or not extracted.get("ok"):
-                raise airlift.AirLiftError((extracted or {}).get("error", "ファイル抽出に失敗しました。"))
+                raise airlift.AirLiftError((extracted or {}).get("error", "Couldn't extract the file."))
             if not finish or finish.get("exitCode") or not finish.get("ok"):
-                raise airlift.AirLiftError((finish or {}).get("error", "抽出後の復元に失敗しました。"))
+                raise airlift.AirLiftError((finish or {}).get("error", "Couldn't put the item back after extracting it."))
             return {"ok": True, "target": target, "local": local_path,
                     "bytes": extracted.get("bytes"), "exactBytesVerified": True,
                     "restored": True, "cleanupComplete": finish.get("cleanupComplete", False)}

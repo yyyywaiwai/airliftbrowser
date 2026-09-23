@@ -19,7 +19,7 @@ final class AppManager {
     var category = "all"
     var libraryMode = false
     var busy = false
-    var status = "アプリを選択してください"
+    var status = String(localized: "アプリを選んでください")
     var fraction: Double?
     var error: String?
     var warnings: [String] = []
@@ -30,6 +30,7 @@ final class AppManager {
         didSet { UserDefaults.standard.set(verificationEnabled, forKey: "appTransferVerification") }
     }
     private var cancellationURL: URL?
+    private var progressStatus: String?
     private var nextActivation: (device: String?, library: Bool)?
     private var finderExportID: UUID?
     private var finderExportRemaining = 0
@@ -51,7 +52,9 @@ final class AppManager {
     var backup: AppBackup? { backups.first { $0.id == backupID } }
     var regions: [AppRegion] { libraryMode ? backup?.regions ?? [] : app?.regions ?? [] }
     var currentRegion: AppRegion? { regions.first { $0.id == regionID } }
-    var title: String { libraryMode ? backup?.name ?? "バックアップ" : app?.name ?? "アプリ" }
+    var title: String {
+        libraryMode ? backup?.name ?? String(localized: "バックアップ") : app?.name ?? String(localized: "アプリ")
+    }
     var visibleApps: [ManagedApp] {
         apps.filter { (category == "all" || $0.category == category) &&
             (search.isEmpty || $0.name.localizedStandardContains(search) || $0.bundleID.localizedStandardContains(search)) }
@@ -100,11 +103,11 @@ final class AppManager {
                 busy = true
                 fraction = nil
                 cancellationURL = cancelURL
-                operation = AppOperation(title: "Finderへコピー（\(count) 項目）", appName: appName)
+                operation = AppOperation(title: String(localized: "Finderへコピー（\(count) 項目）"), appName: appName)
                 showOperation = false
             }
             guard finderExportID == id else { return }
-            status = "Finderへコピー中: \(name)"
+            status = String(localized: "Finderへコピー中: \(name)")
             operation?.message = status
             operation?.append(status)
         case .progress(let response):
@@ -113,15 +116,18 @@ final class AppManager {
         case .finished(let name, let failure):
             guard finderExportID == id else { return }
             if let failure { finderExportFailures.append("\(name): \(failure)") }
-            operation?.append(failure.map { "コピー失敗: \(name) — \($0)" } ?? "コピー完了: \(name)")
+            operation?.append(failure.map { String(localized: "コピーできませんでした: \(name) — \($0)") }
+                ?? String(localized: "コピーしました: \(name)"))
             finderExportRemaining -= 1
             guard finderExportRemaining == 0 else {
                 fraction = nil
-                status = "Finderへコピー中（残り \(finderExportRemaining) 項目）"
+                status = String(localized: "Finderへコピー中（残り \(finderExportRemaining) 項目）")
                 return
             }
             let failed = !finderExportFailures.isEmpty
-            status = failed ? "Finderへのコピーが完了しませんでした" : "Finderへのコピーが完了しました"
+            status = failed
+                ? String(localized: "Finderへのコピーを完了できませんでした")
+                : String(localized: "Finderへのコピーが完了しました")
             operation?.finish(status, failed: failed)
             if failed { error = finderExportFailures.joined(separator: "\n") }
             finderExportID = nil
@@ -132,7 +138,7 @@ final class AppManager {
     @discardableResult
     func importDroppedURLs(_ urls: [URL]) -> Bool {
         guard canReceiveFiles, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
-        perform("ファイルを受信") {
+        perform(String(localized: "ファイルを追加")) {
             let staged = try stageDroppedURLs(urls)
             defer { try? FileManager.default.removeItem(at: staged.root) }
             var failures: [String] = []
@@ -150,7 +156,7 @@ final class AppManager {
                 }
             }
             if !failures.isEmpty { throw AppServiceError(failures.joined(separator: "\n")) }
-            self.status = "\(staged.files.count) 項目を受信しました"
+            self.status = String(localized: "\(staged.files.count) 項目を追加しました")
         }
         return true
     }
@@ -165,7 +171,7 @@ final class AppManager {
         libraryMode = library
         if changed { fileIndexes = [:]; resetFiles(); warnings = [] }
         if device == nil { apps = []; pending = [] }
-        perform(library ? "バックアップを取得" : "アプリを取得") {
+        perform(library ? String(localized: "バックアップを読み込み") : String(localized: "アプリを読み込み")) {
             try await self.loadBackups()
             if !library, let device {
                 let response = try await self.call(AppRequest(action: "catalog", device: device))
@@ -178,7 +184,7 @@ final class AppManager {
                 try await self.loadFiles()
             } else if !self.libraryMode {
                 self.resetFiles()
-                self.status = self.app == nil ? "アプリを選択してください" : "操作を選択してください"
+                self.status = self.app == nil ? String(localized: "アプリを選んでください") : String(localized: "操作を選んでください")
             }
         }
     }
@@ -187,13 +193,13 @@ final class AppManager {
         guard !busy else { return }
         appID = id
         resetFiles()
-        status = app == nil ? "アプリを選択してください" : "操作を選択してください"
+        status = app == nil ? String(localized: "アプリを選んでください") : String(localized: "操作を選んでください")
     }
 
     func showAppActions() {
         guard !busy else { return }
         resetFiles()
-        status = "操作を選択してください"
+        status = String(localized: "操作を選んでください")
     }
 
     func selectBackup(_ id: String?) {
@@ -201,14 +207,14 @@ final class AppManager {
         backupID = id
         resetFiles()
         regionID = backup?.regions.first?.id
-        if backup != nil { perform("バックアップを開く") { try await self.loadFiles() } }
+        if backup != nil { perform(String(localized: "バックアップを開く")) { try await self.loadFiles() } }
     }
 
     func selectRegion(_ id: String?) {
         guard !busy else { return }
         resetFiles()
         regionID = id
-        if id != nil, !showCachedFiles() { perform("領域を開く") { try await self.loadFiles() } }
+        if id != nil, !showCachedFiles() { perform(String(localized: "データを開く")) { try await self.loadFiles() } }
     }
 
     func navigate(_ path: String) {
@@ -216,19 +222,19 @@ final class AppManager {
         relativePath = path
         selection = []
         fileSearch = ""
-        if !showCachedFiles() { perform("フォルダを開く") { try await self.loadFiles() } }
+        if !showCachedFiles() { perform(String(localized: "フォルダを開く")) { try await self.loadFiles() } }
     }
 
     func refresh() {
         guard !busy else { return }
         if let key = fileIndexKey { fileIndexes.removeValue(forKey: key) }
-        if canBrowse, currentRegion != nil { perform("一覧を更新") { try await self.loadFiles(); try await self.loadBackups() } }
+        if canBrowse, currentRegion != nil { perform(String(localized: "一覧を更新")) { try await self.loadFiles(); try await self.loadBackups() } }
         else { activate(device: deviceID, library: libraryMode) }
     }
 
     func backupApp(regionKinds: Set<String>) {
         guard let deviceID, let appID, !regionKinds.isEmpty else { return }
-        perform("アプリをバックアップ", showSheet: true) {
+        perform(String(localized: "アプリをバックアップ"), showSheet: true) {
             let result = try await self.call(AppRequest(action: "backup", device: deviceID, appID: appID,
                                                         regionKinds: regionKinds.sorted()))
             if let saved = result.backup {
@@ -238,22 +244,22 @@ final class AppManager {
                 self.backups.removeAll { $0.id == saved.id }
                 self.backups.insert(saved, at: 0)
                 self.status = "\(saved.statusLabel): \(saved.dateLabel)"
-                self.operation?.append("保存先: " + saved.path)
+                self.operation?.append(String(localized: "保存先: \(saved.path)"))
                 self.operation?.failed = saved.status != "complete"
                 if !saved.issues.isEmpty { self.warnings = saved.issues }
-                for issue in saved.issues { self.operation?.append("未取得: " + issue) }
+                for issue in saved.issues { self.operation?.append(String(localized: "保存できなかった項目: \(issue)")) }
             }
         }
     }
 
     func importBackup() {
         let panel = NSOpenPanel()
-        panel.title = "バックアップ／xcappdataを読み込み"
+        panel.title = String(localized: "バックアップを読み込み")
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.treatsFilePackagesAsDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        perform("バックアップを読み込み", showSheet: true) {
+        perform(String(localized: "バックアップを読み込み"), showSheet: true) {
             let result = try await self.call(AppRequest(action: "import", source: url.path))
             try await self.loadBackups()
             if self.libraryMode, let saved = result.backup {
@@ -262,7 +268,7 @@ final class AppManager {
                 self.regionID = saved.regions.first?.id
                 try await self.loadFiles()
             }
-            self.status = "バックアップの読み込みが完了しました"
+            self.status = String(localized: "バックアップを読み込みました")
         }
     }
 
@@ -270,9 +276,9 @@ final class AppManager {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = backup.name + (xcappdata ? ".xcappdata" : ".airliftbackup")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        perform("バックアップを書き出し", showSheet: true, appName: backup.name) {
+        perform(String(localized: "バックアップを書き出し"), showSheet: true, appName: backup.name) {
             _ = try await self.call(AppRequest(action: "export", backupPath: backup.path, destination: url.path, xcappdata: xcappdata))
-            self.status = "バックアップの書き出しが完了しました"
+            self.status = String(localized: "バックアップを書き出しました")
         }
     }
 
@@ -282,7 +288,7 @@ final class AppManager {
 
     func deleteBackup(_ backup: AppBackup) {
         guard !busy else { return }
-        perform("バックアップをゴミ箱に移動") {
+        perform(String(localized: "バックアップをゴミ箱に入れる")) {
             let path = backup.path
             try await Task.detached {
                 try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
@@ -292,23 +298,23 @@ final class AppManager {
                 self.backupID = nil
                 if self.libraryMode { self.resetFiles() }
             }
-            self.status = "「\(backup.name)」をゴミ箱に移動しました"
+            self.status = String(localized: "「\(backup.name)」をゴミ箱に入れました")
         }
     }
 
     func restore(_ backup: AppBackup, target: ManagedApp, mode: String, mappings: [String: String]) {
         guard let deviceID else { return }
-        perform("\(target.name)へ復元", showSheet: true, appName: target.name) {
-            let result = try await self.call(AppRequest(action: "restore", device: deviceID, appID: target.id,
-                                                       backupPath: backup.path, mode: mode, mappings: mappings))
+        perform(String(localized: "「\(target.name)」に復元"), showSheet: true, appName: target.name) {
+            _ = try await self.call(AppRequest(action: "restore", device: deviceID, appID: target.id,
+                                               backupPath: backup.path, mode: mode, mappings: mappings))
             if !self.libraryMode, self.appID == target.id { try await self.loadFiles() }
-            self.status = result.message ?? "復元が完了しました"
+            self.status = String(localized: "復元が完了しました")
         }
     }
 
     func loadRestoreApps() {
         guard let deviceID else { return }
-        perform("復元先を取得") {
+        perform(String(localized: "復元先のアプリを読み込み")) {
             let result = try await self.call(AppRequest(action: "catalog", device: deviceID))
             self.apps = result.apps ?? []
             self.pending = result.pending ?? []
@@ -317,10 +323,10 @@ final class AppManager {
 
     func recover() {
         guard let deviceID else { return }
-        perform("未完了操作を復旧", showSheet: true) {
+        perform(String(localized: "中断した処理を復旧"), showSheet: true) {
             let response = try await self.call(AppRequest(action: "recover", device: deviceID))
             self.pending = response.pending ?? []
-            self.status = "未完了操作の復旧が完了しました"
+            self.status = String(localized: "中断した処理を復旧しました")
         }
     }
 
@@ -328,7 +334,7 @@ final class AppManager {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = file.name
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        perform("Macに保存") {
+        perform(String(localized: "Macに保存")) {
             var request = self.context("get", relative: file.id)
             request.file = file
             request.local = url.path
@@ -341,7 +347,7 @@ final class AppManager {
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        perform("ファイルを送信") {
+        perform(String(localized: "ファイルを追加")) {
             var request = self.context("mutate", relative: self.join(url.lastPathComponent))
             request.operation = "upload"
             request.local = url.path
@@ -352,10 +358,10 @@ final class AppManager {
 
     func mutate(operation: String, file: AppFile? = nil, name: String? = nil) {
         if let name, name.isEmpty || name == "." || name == ".." || name.contains("/") || name.contains("\0") {
-            error = "ファイル名が不正です。"
+            error = String(localized: "この名前は使えません。")
             return
         }
-        perform("ファイルを変更") {
+        perform(String(localized: "ファイルを変更")) {
             var request = self.context("mutate", relative: file?.id ?? self.join(name ?? ""))
             request.operation = operation
             if let name { request.destination = self.join(name) }
@@ -367,7 +373,7 @@ final class AppManager {
         guard let cancellationURL else { return }
         do {
             try Data().write(to: cancellationURL)
-            status = "中止しています。コンテナの復帰を待っています…"
+            status = String(localized: "中止しています。データを元の場所に戻すまでお待ちください…")
             operation?.cancelling = true
             operation?.append(status)
         }
@@ -389,11 +395,11 @@ final class AppManager {
         if let entries = index.entries(at: relativePath) {
             files = entries
             fileListingError = nil
-            status = "\(files.count) 項目（取得済みの一覧・更新で再取得）"
+            status = String(localized: "\(files.count) 項目")
         } else {
             files = []
-            fileListingError = "取得済みの一覧にこのフォルダがありません。親フォルダに戻るか、一覧を更新してください。"
-            status = "フォルダが見つかりません"
+            fileListingError = String(localized: "このフォルダは見つかりませんでした。上のフォルダに戻るか、一覧を更新してください。")
+            status = String(localized: "フォルダが見つかりません")
         }
         selection = selection.intersection(Set(files.map(\.id)))
         return true
@@ -406,7 +412,7 @@ final class AppManager {
         do {
             if let key = fileIndexKey {
                 let result = try await call(context("list-tree", relative: ""))
-                guard let tree = result.tree else { throw AppServiceError("ファイル一覧を取得できませんでした。") }
+                guard let tree = result.tree else { throw AppServiceError(String(localized: "ファイルの一覧を読み込めませんでした。")) }
                 fileIndexes[key] = AppFileIndex(tree, sourceIdentity: result.sourceIdentity)
                 showCachedFiles()
             } else {
@@ -449,7 +455,7 @@ final class AppManager {
         }
         if request.action == "backup" || request.action == "restore" {
             request.verify = verificationEnabled
-            operation?.append("内容検証: " + (verificationEnabled ? "有効" : "無効（スキップ）"))
+            operation?.append(verificationEnabled ? String(localized: "内容の確認: オン") : String(localized: "内容の確認: オフ"))
         }
         request.cancelPath = cancellationURL?.path
         return try await service(request) { [weak self] response in
@@ -459,7 +465,10 @@ final class AppManager {
 
     private func updateProgress(_ response: AppResponse) {
         operation?.update(response)
-        status = response.message ?? status
+        if let stage = operation?.stageName {
+            status = stage
+            progressStatus = stage
+        }
         if let completed = response.completed, let total = response.total, total > 0 {
             fraction = Double(completed) / Double(total)
         } else { fraction = nil }
@@ -478,14 +487,14 @@ final class AppManager {
             defer { finishWork() }
             do {
                 try await operation()
-                if status == message || status.hasPrefix("コンテナ") || status.hasPrefix("取得:") || status.hasPrefix("照合:") || self.operation?.phase == "cleanup" {
-                    status = "完了"
+                if status == message || status == progressStatus {
+                    status = String(localized: "完了")
                 }
                 self.operation?.finish(self.status, failed: self.operation?.failed ?? false)
             } catch {
                 self.operation?.finish(error.localizedDescription, failed: true)
                 if !showOperation { self.error = error.localizedDescription }
-                status = "処理を完了できませんでした"
+                status = String(localized: "処理を完了できませんでした")
                 if let deviceID,
                    let result = try? await service(AppRequest(action: "pending", device: deviceID), { _ in }) {
                     pending = result.pending ?? []

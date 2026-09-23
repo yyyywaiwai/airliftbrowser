@@ -78,24 +78,24 @@ airlift.available_devices = available_devices
 
 def uid_index(value):
     if not isinstance(value, plistlib.UID):
-        raise ValueError("FrontFaceの参照形式が想定と異なります")
+        raise ValueError("Unexpected FrontFace reference format")
     return value.data
 
 
 def front_face_png(path: Path) -> bytes:
     data = path.read_bytes()
     if len(data) < 56 or data[48:56] != b"bplist00":
-        raise ValueError("FrontFace形式を認識できません")
+        raise ValueError("Unrecognized FrontFace format")
     archive_data = data[48:]
     if hashlib.sha256(archive_data).digest() != data[16:48]:
-        raise ValueError("FrontFaceのハッシュが一致しません")
+        raise ValueError("FrontFace checksum doesn't match")
     archive = plistlib.loads(archive_data)
     objects = archive["$objects"]
     root = objects[uid_index(archive["$top"]["root"])]
     face = objects[uid_index(root["faceImage"])]
     png = objects[uid_index(face["imageData"])]["NS.data"]
     if not isinstance(png, bytes) or not png.startswith(PNG_MAGIC):
-        raise ValueError("FrontFaceの画像がPNGではありません")
+        raise ValueError("FrontFace image isn't a PNG")
     return png
 
 
@@ -198,7 +198,7 @@ def create_catalog(download: Path, output: Path) -> list[dict]:
         card_id = pass_root.name.removesuffix(".pkpass")
         if not card_id or "/" in card_id or "\0" in card_id:
             continue
-        title = display_text(metadata.get("organizationName"), 80) or display_text(metadata.get("description"), 80) or "カード"
+        title = display_text(metadata.get("organizationName"), 80) or display_text(metadata.get("description"), 80) or "Card"
         assets = []
         for name in ARTWORK:
             artwork = pass_root / name
@@ -251,14 +251,14 @@ def wait_recovered(udid, recovered, mode):
     result = airlift.run_json(
         [os.fspath(BRIDGE), "wait-recovered", udid, recovered, mode], timeout=30)
     if not host_ok(result):
-        raise airlift.AirLiftError(result.get("error") or "退避データの確認に失敗しました。")
+        raise airlift.AirLiftError(result.get("error") or "Couldn't check the saved data.")
     return result
 
 
 def run_steps(udid, pairs, callbacks):
     """One AirTraffic sync. callbacks[i] runs after pair i, while the sync stays open."""
     if len(pairs) != len(callbacks):
-        raise airlift.AirLiftError("AirTrafficの段階数が一致しません。")
+        raise airlift.AirLiftError("The device transfer reported an unexpected number of steps.")
     environment = os.environ.copy()
     environment["AIRLIFT_STEP"] = "1"
     command = [os.fspath(airlift.AIRTRAFFIC_HOST), udid]
@@ -279,7 +279,7 @@ def run_steps(udid, pairs, callbacks):
             continue
         step = int(line.rsplit("AIRLIFT_STEP", 1)[1])
         if step != len(seen):
-            callback_error = callback_error or airlift.AirLiftError("AirTrafficの段階順が不正です。")
+            callback_error = callback_error or airlift.AirLiftError("The device transfer steps arrived out of order.")
         else:
             try:
                 callbacks[step]()
@@ -293,7 +293,7 @@ def run_steps(udid, pairs, callbacks):
     except subprocess.TimeoutExpired:
         process.kill()
         stdout, _stderr = process.communicate()
-        raise airlift.AirLiftError("AirTrafficが時間内に終わりませんでした。")
+        raise airlift.AirLiftError("The device transfer didn't finish in time.")
     result = None
     for line in reversed((stdout or "").splitlines()):
         try:
@@ -306,7 +306,7 @@ def run_steps(udid, pairs, callbacks):
     if callback_error is not None:
         raise callback_error
     if process.returncode != 0 or not result or not result.get("ok") or seen != list(range(len(callbacks))):
-        raise airlift.AirLiftError((result or {}).get("error") or "AirTraffic処理が完了しませんでした。")
+        raise airlift.AirLiftError((result or {}).get("error") or "The device transfer didn't complete.")
     return result
 
 
@@ -350,13 +350,13 @@ def list_cards(device_id: str) -> dict:
         airlift.preflight(udid)
         snapshot = airlift.native("snapshot-books", udid, os.fspath(snapshot_root))
         if not airlift.operation_ok(snapshot):
-            raise airlift.AirLiftError("Books同期状態を保存できませんでした。")
+            raise airlift.AirLiftError("Couldn't save the Books sync state.")
         stage = airlift.native(
             "stage", udid, source, link, recovered,
             os.fspath(archive), os.fspath(books), os.fspath(snapshot_root))
         cleanup_authorized = bool(stage.get("operation", {}).get("cleanupAuthorized"))
         if not airlift.operation_ok(stage):
-            raise airlift.AirLiftError("カード読み出しの準備に失敗しました。")
+            raise airlift.AirLiftError("Couldn't prepare to read the cards.")
         download = work / "Cards"
 
         def placed_link():
@@ -370,7 +370,7 @@ def list_cards(device_id: str) -> dict:
                 [os.fspath(BRIDGE), "pull-card-catalog", udid, recovered, os.fspath(download)],
                 timeout=120)
             if not host_ok(pulled):
-                raise airlift.AirLiftError(pulled.get("error") or "券面のコピーに失敗しました。")
+                raise airlift.AirLiftError(pulled.get("error") or "Couldn't copy the card images.")
             cards = create_catalog(download, output)
             shutil.rmtree(download, ignore_errors=True)
 
@@ -408,10 +408,10 @@ def list_cards(device_id: str) -> dict:
         shutil.rmtree(output, ignore_errors=True)
         if moved and not restored:
             raise airlift.AirLiftError(
-                f"Cardsを元の場所へ戻せませんでした。回収データはMedia/{recovered}に残しています。削除しないでください。") from error
+                f"Couldn't put Cards back in its original location. The recovered data is kept in Media/{recovered}. Don't delete it.") from error
         if error is not None:
             raise error
-        raise airlift.AirLiftError((finish or {}).get("error") or "券面の読み出し後の後片付けに失敗しました。")
+        raise airlift.AirLiftError((finish or {}).get("error") or "Couldn't clean up after reading the card images.")
     return {"ok": True, "cards": cards, "count": len(cards),
             "snapshotPath": os.fspath(output), "restored": True, "cleanupComplete": True}
 
@@ -489,7 +489,7 @@ def main() -> int:
         self_test()
         return 0
     if not args.device:
-        print(json.dumps({"ok": False, "error": "端末が指定されていません。"}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": "No device selected."}, ensure_ascii=False))
         return 1
     try:
         result = list_cards(args.device)

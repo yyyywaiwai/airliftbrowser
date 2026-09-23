@@ -11,9 +11,6 @@ struct AppResponse: Decodable, Sendable {
     var region: String?
     var regionIndex: Int?
     var regionCount: Int?
-    var chunkSize: Int64?
-    var chunkIndex: Int64?
-    var chunkCount: Int64?
     var steps: [AppOperationStep]?
     var apps: [ManagedApp]?
     var backups: [AppBackup]?

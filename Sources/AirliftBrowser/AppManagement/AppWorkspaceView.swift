@@ -14,22 +14,21 @@ struct AppWorkspaceView: View {
                     HStack {
                         Text(library ? "バックアップ" : "アプリ").font(.headline)
                         Spacer()
-                        Button("一覧を再取得", systemImage: "arrow.clockwise") {
+                        Button("一覧を更新", systemImage: "arrow.clockwise") {
                             manager.activate(device: deviceID, library: library)
                         }.labelStyle(.iconOnly).buttonStyle(.plain)
                         Text("\(library ? manager.visibleBackups.count : manager.visibleApps.count)")
                             .foregroundStyle(.secondary).monospacedDigit()
                     }.padding(14)
-                    TextField(library ? "バックアップを検索" : "名前・Bundle IDを検索", text: $manager.search)
-                        .accessibilityLabel(library ? "バックアップを検索" : "アプリを検索")
+                    TextField(library ? "バックアップを検索" : "アプリを検索", text: $manager.search)
                         .accessibilityIdentifier("app-manager-search")
                         .textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.bottom, 10)
                     if !library {
                         Picker("種類", selection: $manager.category) {
                             Text("すべて").tag("all")
-                            Text("ユーザー").tag("user")
-                            Text("標準").tag("system")
-                            Text("残存").tag("orphan")
+                            Text("インストール済み").tag("user")
+                            Text("Apple製").tag("system")
+                            Text("残りデータ").tag("orphan")
                         }.labelsHidden().padding(.horizontal, 12).padding(.bottom, 8)
                     }
                     if library {
@@ -70,21 +69,21 @@ struct AppWorkspaceView: View {
                         .frame(minWidth: 420, maxWidth: .infinity)
                 } else {
                     ContentUnavailableView(
-                        library ? "バックアップを選択" : deviceID == nil ? "USBデバイスを接続" : "アプリを選択",
+                        library ? "バックアップを選んでください" : deviceID == nil ? "iPhoneまたはiPadを接続してください" : "アプリを選んでください",
                         systemImage: library ? "archivebox" : "square.grid.2x2",
-                        description: Text(library ? "保存したバックアップは、端末を接続せずにファイル管理できます。" : "アプリのデータ・App Group・本体を管理します。"))
+                        description: Text(library ? "保存したバックアップは、デバイスを接続しなくても中身を確認できます。" : "アプリのデータを表示したり、バックアップしたりできます。"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             if !manager.pending.isEmpty {
                 HStack {
-                    Label("\(manager.pending.count) 件の未完了操作", systemImage: "arrow.triangle.2.circlepath")
+                    Label("中断した処理が \(manager.pending.count) 件あります", systemImage: "arrow.triangle.2.circlepath")
                     Spacer()
-                    Button("未完了操作を復旧", action: manager.recover).disabled(manager.busy)
+                    Button("中断した処理を復旧", action: manager.recover).disabled(manager.busy)
                 }.padding(12).background(.orange.opacity(0.1))
             }
             if !manager.warnings.isEmpty {
-                DisclosureGroup("取得状況・詳細 (\(manager.warnings.count))") {
+                DisclosureGroup("詳細（\(manager.warnings.count)）") {
                     ScrollView { Text(manager.warnings.joined(separator: "\n")).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         .frame(maxHeight: 100)
                 }.font(.caption).padding(.horizontal, 12).padding(.vertical, 8)
@@ -102,28 +101,27 @@ struct AppWorkspaceView: View {
                     .controlSize(.small)
                     .disabled(manager.operation == nil)
                 if manager.busy { Button("中止", action: manager.cancel).controlSize(.small) }
-                else { Text(library ? "Mac上のバックアップ" : "USB · アプリ単位").foregroundStyle(.tertiary) }
             }.font(.caption).foregroundStyle(.secondary).padding(12)
         }
-        .navigationTitle(library ? "バックアップ" : "アプリ管理")
+        .navigationTitle(library ? "バックアップ" : "アプリ")
         .toolbar {
             ToolbarItemGroup {
                 Group {
                 Button("更新", systemImage: "arrow.clockwise", action: manager.refresh).keyboardShortcut("r")
-                Button("読み込み", systemImage: "square.and.arrow.down", action: manager.importBackup)
+                Button("バックアップを読み込み", systemImage: "square.and.arrow.down", action: manager.importBackup)
                 if !library {
                     Button("バックアップ", systemImage: "archivebox") { showBackup = true }
                         .disabled(manager.app == nil || manager.regions.isEmpty || deviceID == nil)
                 } else if let backup = manager.backup {
-                    Menu("エクスポート", systemImage: "square.and.arrow.up") {
-                        Button("Airliftバックアップ…") { manager.exportBackup(backup, xcappdata: false) }
-                        Button("xcappdata…") { manager.exportBackup(backup, xcappdata: true) }
+                    Menu("書き出し", systemImage: "square.and.arrow.up") {
+                        Button("Airlift形式…") { manager.exportBackup(backup, xcappdata: false) }
+                        Button("Xcode形式（.xcappdata）…") { manager.exportBackup(backup, xcappdata: true) }
                             .disabled(!backup.regions.contains { $0.kind == "data" })
                     }
-                    Button("リストア", systemImage: "arrow.uturn.backward") { restoreSource = backup }
+                    Button("復元", systemImage: "arrow.uturn.backward") { restoreSource = backup }
                         .disabled(deviceID == nil || !backup.canRestore)
                     Button("削除", systemImage: "trash", role: .destructive) { manager.deleteBackup(backup) }
-                        .help("選択したバックアップをゴミ箱に移動")
+                        .help("選んだバックアップをゴミ箱に入れます")
                 }
                 }.labelStyle(.iconOnly).disabled(manager.busy)
             }

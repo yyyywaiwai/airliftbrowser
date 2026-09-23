@@ -35,7 +35,9 @@ struct Entry: Decodable, Identifiable, Sendable {
     var isDirectory: Bool { kind == "S_IFDIR" }
     var isFile: Bool { kind == "S_IFREG" }
     var isVerifiedDirectory: Bool { isDirectory && verifiedDirectoryPaths.contains(id) }
-    var typeName: String { isDirectory ? "フォルダ" : isFile ? "ファイル" : "リンク / その他" }
+    var typeName: String {
+        isDirectory ? String(localized: "フォルダ") : isFile ? String(localized: "ファイル") : String(localized: "その他")
+    }
     var sizeLabel: String { isFile && size >= 0 ? ByteCountFormatter.string(fromByteCount: size, countStyle: .file) : "—" }
 }
 
@@ -184,7 +186,7 @@ private func isProtectedDevicePath(_ path: String) -> Bool {
 
 private func exportRequest(_ request: ExportRequest) async throws -> URL {
     if request.scope == .system && request.entry.isDirectory && isProtectedDevicePath(request.entry.id) {
-        throw BridgeError(message: "「\(request.entry.name)」はシステム階層のため抽出できません。")
+        throw BridgeError(message: String(localized: "「\(request.entry.name)」は保護されたフォルダのため保存できません。"))
     }
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("airlift-export-\(UUID().uuidString)", isDirectory: true)
@@ -201,14 +203,14 @@ private func exportRequest(_ request: ExportRequest) async throws -> URL {
             throw error
         }
     case .cards:
-        throw BridgeError(message: "カードはこの操作の対象外です。")
+        throw BridgeError(message: String(localized: "カードではこの操作はできません。"))
     }
     return destination
 }
 
 private func saveMedia(_ entry: Entry, to destination: URL, deviceID: String) async throws {
     guard entry.isFile || entry.isDirectory else {
-        throw BridgeError(message: "「\(entry.name)」は保存できない種類です。")
+        throw BridgeError(message: String(localized: "「\(entry.name)」は保存できない種類の項目です。"))
     }
     if entry.isFile {
         _ = try await bridge(["get", deviceID, entry.id, destination.path])
@@ -236,7 +238,7 @@ private func stageDropped(_ providers: [NSItemProvider]) async throws -> StagedD
             let copied: URL = try await withCheckedThrowingContinuation { continuation in
                 _ = provider.loadObject(ofClass: URL.self) { object, error in
                     guard let url = object else {
-                        continuation.resume(throwing: error ?? BridgeError(message: "ドロップした項目を読み取れませんでした。"))
+                        continuation.resume(throwing: error ?? BridgeError(message: String(localized: "ドロップした項目を読み込めませんでした。")))
                         return
                     }
                     let access = url.startAccessingSecurityScopedResource()
@@ -245,7 +247,7 @@ private func stageDropped(_ providers: [NSItemProvider]) async throws -> StagedD
                     let dest = root.appendingPathComponent(leaf)
                     do {
                         if FileManager.default.fileExists(atPath: dest.path) {
-                            throw BridgeError(message: "「\(leaf)」が重複しています。")
+                            throw BridgeError(message: String(localized: "同じ名前の項目「\(leaf)」が複数あります。"))
                         }
                         try FileManager.default.copyItem(at: url, to: dest)
                         continuation.resume(returning: dest)
@@ -275,7 +277,7 @@ func stageDroppedURLs(_ urls: [URL]) throws -> StagedDrop {
             let leaf = url.lastPathComponent.isEmpty ? "item-\(index)" : url.lastPathComponent
             let dest = root.appendingPathComponent(leaf)
             if FileManager.default.fileExists(atPath: dest.path) {
-                throw BridgeError(message: "「\(leaf)」が重複しています。")
+                throw BridgeError(message: String(localized: "同じ名前の項目「\(leaf)」が複数あります。"))
             }
             try FileManager.default.copyItem(at: url, to: dest)
             files.append(dest)
@@ -300,10 +302,10 @@ private func bridge(_ arguments: [String]) async throws -> Reply {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
-            throw BridgeError(message: "接続処理が中断されました（終了コード \(process.terminationStatus)）。USB接続とロック状態を確認してください。")
+            throw BridgeError(message: String(localized: "デバイスとの通信が途切れました（コード \(process.terminationStatus)）。ケーブルの接続とロック解除を確認してください。"))
         }
         guard process.terminationStatus == 0, reply.ok else {
-            throw BridgeError(message: reply.error ?? "端末操作に失敗しました。")
+            throw BridgeError(message: reply.error ?? String(localized: "デバイスでの操作に失敗しました。"))
         }
         return reply
     }.value
@@ -325,10 +327,10 @@ private func runPoCProcess(_ deviceID: String, target: String) async throws -> P
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let result = try? JSONDecoder().decode(PoCResult.self, from: data) else {
-            throw BridgeError(message: "Airlift PoCが結果を返しませんでした（終了コード \(process.terminationStatus)）。")
+            throw BridgeError(message: String(localized: "テストの結果を受け取れませんでした（コード \(process.terminationStatus)）。"))
         }
         guard process.terminationStatus == 0, result.ok else {
-            throw BridgeError(message: result.error ?? "Airlift PoCの検証に失敗しました。")
+            throw BridgeError(message: result.error ?? String(localized: "テストに失敗しました。"))
         }
         return result
     }.value
@@ -351,11 +353,11 @@ private func writeOutside(_ deviceID: String, target: String, local: URL) async 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let result = try? JSONDecoder().decode(WriteResult.self, from: data) else {
-            throw BridgeError(message: "Airlift書込み処理が結果を返しませんでした。")
+            throw BridgeError(message: String(localized: "書き込みの結果を受け取れませんでした。"))
         }
         guard process.terminationStatus == 0, result.ok,
               result.exactBytesVerified == true, result.cleanupComplete == true else {
-            throw BridgeError(message: result.error ?? "Airlift書込みの照合または後片付けに失敗しました。")
+            throw BridgeError(message: result.error ?? String(localized: "書き込んだ内容の確認、または後片付けに失敗しました。"))
         }
         return result
     }.value
@@ -382,13 +384,12 @@ private func listPayCards(_ deviceID: String) async throws -> CardListResult {
             let detail = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let clipped = detail.map { String($0.prefix(240)) }
-            throw BridgeError(message: clipped?.isEmpty == false
-                ? "Apple Payカードの一覧を読み取れませんでした。\n\(clipped!)"
-                : "Apple Payカードの一覧を読み取れませんでした。")
+            let failed = String(localized: "カードを読み込めませんでした。")
+            throw BridgeError(message: clipped?.isEmpty == false ? "\(failed)\n\(clipped!)" : failed)
         }
         guard process.terminationStatus == 0, result.ok, result.restored == true,
               result.cleanupComplete == true else {
-            throw BridgeError(message: result.error ?? "Apple Payカードの読み出しまたは端末への復元に失敗しました。")
+            throw BridgeError(message: result.error ?? String(localized: "カードの読み込み、またはデバイスへの書き戻しに失敗しました。"))
         }
         return result
     }.value
@@ -415,13 +416,15 @@ private func editCard(_ deviceID: String, arguments: [String]) async throws -> C
         guard let result = try? JSONDecoder().decode(CardEditResult.self, from: data) else {
             let detail = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let failed = exporting ? "元の券面を保存できませんでした。" : "券面を書き換えられませんでした。"
+            let failed = exporting
+                ? String(localized: "元の画像を保存できませんでした。")
+                : String(localized: "カードの画像を変更できませんでした。")
             throw BridgeError(message: detail?.isEmpty == false
                 ? "\(failed)\n\(detail!.prefix(240))"
                 : failed)
         }
         guard process.terminationStatus == 0, result.ok else {
-            throw BridgeError(message: result.error ?? "券面の書き換えまたは復元に失敗しました。")
+            throw BridgeError(message: result.error ?? String(localized: "カードの画像の変更、または復元に失敗しました。"))
         }
         return result
     }.value
@@ -444,14 +447,14 @@ private func moveOutside(_ deviceID: String, target: String, local: URL? = nil) 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let result = try? JSONDecoder().decode(FileResult.self, from: data) else {
-            throw BridgeError(message: "Airliftファイル処理が結果を返しませんでした。")
+            throw BridgeError(message: String(localized: "ファイル操作の結果を受け取れませんでした。"))
         }
         let completed = local == nil
             ? result.deleted == true && result.targetAbsent == true
             : result.exactBytesVerified == true && result.restored == true
         guard process.terminationStatus == 0, result.ok, completed,
               result.cleanupComplete == true else {
-            throw BridgeError(message: result.error ?? "Airliftファイル処理または後片付けに失敗しました。")
+            throw BridgeError(message: result.error ?? String(localized: "ファイル操作、または後片付けに失敗しました。"))
         }
         return result
     }.value
@@ -531,10 +534,10 @@ private func listContainerFiles(_ deviceID: String, path: String) async throws -
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
-            throw BridgeError(message: "実機のコンテナ一覧を取得できませんでした。")
+            throw BridgeError(message: String(localized: "フォルダの中身を読み込めませんでした。"))
         }
         guard process.terminationStatus == 0, reply.ok else {
-            throw BridgeError(message: reply.error ?? "コンテナ一覧の取得に失敗しました。")
+            throw BridgeError(message: reply.error ?? String(localized: "フォルダの中身を読み込めませんでした。"))
         }
         return reply.entries ?? []
     }.value
@@ -547,7 +550,7 @@ private func listDVTFiles(_ deviceID: String, path: String) async throws -> [Ent
             .appendingPathComponent("Contents/Resources/DeviceFiles/dvt_files.py")
         let candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
         guard let python = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
-            throw BridgeError(message: "pymobiledevice3 を実行できる Python が見つかりません。")
+            throw BridgeError(message: String(localized: "pymobiledevice3 が入った Python が見つかりません。"))
         }
         process.executableURL = URL(fileURLWithPath: python)
         process.environment = ProcessInfo.processInfo.environment.merging(
@@ -560,10 +563,10 @@ private func listDVTFiles(_ deviceID: String, path: String) async throws -> [Ent
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
-            throw BridgeError(message: "実機DVTの一覧を取得できませんでした。")
+            throw BridgeError(message: String(localized: "フォルダの中身を読み込めませんでした。"))
         }
         guard process.terminationStatus == 0, reply.ok else {
-            throw BridgeError(message: reply.error ?? "実機DVTの一覧取得に失敗しました。")
+            throw BridgeError(message: reply.error ?? String(localized: "フォルダの中身を読み込めませんでした。"))
         }
         return reply.entries ?? []
     }.value
@@ -591,7 +594,7 @@ final class Browser {
     var batchTotal = 0
     private var transferTail: Task<Void, Never>?
     var error: String?
-    var status = "USBでiPad / iPhoneを接続してください"
+    var status = String(localized: "iPhoneまたはiPadを接続してください")
     var notice: String?
     var pocResult: PoCResult?
     var device: Device? { devices.first { $0.id == deviceID } }
@@ -621,16 +624,16 @@ final class Browser {
             defer { busy = false }
             do {
                 try await action()
-                if status == label { status = "\(label) — 完了" }
+                if status == label { status = String(localized: "\(label) — 完了") }
             } catch {
                 self.error = error.localizedDescription
-                status = "操作が完了しませんでした"
+                status = String(localized: "操作を完了できませんでした")
             }
         }
     }
 
     func scan() {
-        perform("USB端末を検索") {
+        perform(String(localized: "デバイスを検索")) {
             let found = try await bridge(["devices"]).devices ?? []
             self.devices = found.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             if !found.contains(where: { $0.id == self.deviceID }) {
@@ -664,7 +667,7 @@ final class Browser {
     }
 
     private func fetchListing(_ target: String) async throws -> Listing {
-        guard let id = deviceID else { throw BridgeError(message: "USB端末が選択されていません。") }
+        guard let id = deviceID else { throw BridgeError(message: String(localized: "デバイスが選択されていません。")) }
         let loaded: [Entry]
         let listingNotice: String?
         if scope == .media {
@@ -690,7 +693,7 @@ final class Browser {
                 } else {
                     loaded = airliftChildren(of: target)
                     listingNotice = loaded.isEmpty
-                        ? "子項目名の列挙は実機DVTの公開対象外です。既知パスのファイル内容はAirliftで読書きできます。"
+                        ? String(localized: "このフォルダの中身は一覧表示できません。場所がわかっているファイルなら読み書きできます。")
                         : nil
                 }
             }
@@ -732,7 +735,7 @@ final class Browser {
     }
 
     private func loadCards() async throws {
-        guard let id = deviceID else { throw BridgeError(message: "USB端末が選択されていません。") }
+        guard let id = deviceID else { throw BridgeError(message: String(localized: "デバイスが選択されていません。")) }
         let result = try await listPayCards(id)
         if let cardSnapshot, cardSnapshot != result.snapshotPath {
             try? FileManager.default.removeItem(atPath: cardSnapshot)
@@ -744,17 +747,17 @@ final class Browser {
         entries = []
         selection = []
         status = cards.isEmpty
-            ? "支払いカードはありません。端末側のCardsは元の場所へ戻しました。"
-            : "Apple Payカード \(cards.count) 枚。端末側のCardsは元の場所へ戻しました。"
+            ? String(localized: "カードはありません")
+            : String(localized: "\(cards.count) 枚のカードを読み込みました")
     }
 
     func openPastedPath(_ raw: String) {
         guard let target = normalizeDevicePath(raw) else {
-            error = "「/」で始まる絶対パスを貼り付けてください。"
+            error = String(localized: "「/」から始まるパスを貼り付けてください。")
             return
         }
         let previous = (scope, path)
-        perform("パスを開く") {
+        perform(String(localized: "パスを開く")) {
             self.scope = .system
             do {
                 let opened = try await self.reveal(target)
@@ -776,16 +779,16 @@ final class Browser {
         }
         let parent = (target as NSString).deletingLastPathComponent
         let leaf = (target as NSString).lastPathComponent
-        guard parent != target else { throw BridgeError(message: "「\(target)」を開けません。") }
+        guard parent != target else { throw BridgeError(message: String(localized: "「\(target)」を開けません。")) }
         let parentListing = try await fetchListing(parent)
         guard isBrowsable(parent, parentListing),
               let match = parentListing.entries.first(where: { $0.name == leaf }) else {
-            throw BridgeError(message: "「\(target)」は見つかりません。")
+            throw BridgeError(message: String(localized: "「\(target)」が見つかりません。"))
         }
         if match.isDirectory {
             let child = try await fetchListing(match.id)
             guard isBrowsable(match.id, child) else {
-                throw BridgeError(message: "「\(target)」を開けません。")
+                throw BridgeError(message: String(localized: "「\(target)」を開けません。"))
             }
             apply(child, path: match.id)
             return match.id
@@ -797,7 +800,7 @@ final class Browser {
     func navigate(_ target: String, remember: Bool = true) {
         guard target != path else { return }
         let previous = (scope, path)
-        perform(scope == .media ? "フォルダを読み込み" : "実機階層を読み込み") {
+        perform(String(localized: "フォルダを読み込み")) {
             try await self.load(target)
             if remember {
                 self.backStack.append(previous)
@@ -808,10 +811,10 @@ final class Browser {
 
     func reload() {
         if scope == .cards {
-            perform("Apple Payカードを読み込み") { try await self.loadCards() }
+            perform(String(localized: "カードを読み込み")) { try await self.loadCards() }
             return
         }
-        perform(scope == .media ? "フォルダを読み込み" : "実機階層を読み込み") {
+        perform(String(localized: "フォルダを読み込み")) {
             try await self.load(self.path)
         }
     }
@@ -831,7 +834,7 @@ final class Browser {
         }
         scope = .cards
         path = "/"
-        perform("Apple Payカードを読み込み") {
+        perform(String(localized: "カードを読み込み")) {
             do {
                 try await self.loadCards()
                 self.backStack.append(previous)
@@ -846,7 +849,7 @@ final class Browser {
 
     func replaceCard(_ card: PayCard, with url: URL) {
         guard let deviceID, !card.assets.isEmpty else { return }
-        perform("券面を差し替えています") {
+        perform(String(localized: "カードの画像を差し替え")) {
             let copy = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(UUID().uuidString).\(url.pathExtension)")
             let access = url.startAccessingSecurityScopedResource()
@@ -856,34 +859,34 @@ final class Browser {
             let result = try await editCard(deviceID, arguments: self.assetArguments(card) + ["--image", copy.path])
             self.applyCardPreview(card.id, result)
             self.status = result.walletRestarted == true
-                ? "券面を差し替え、Walletを再起動しました。"
-                : "券面を差し替えました。Walletを開き直すと反映されます。"
+                ? String(localized: "カードの画像を差し替えました。")
+                : String(localized: "カードの画像を差し替えました。Walletを開き直すと反映されます。")
         }
     }
 
     func restoreCard(_ card: PayCard) {
         guard let deviceID, !card.assets.isEmpty else { return }
-        perform("元の券面を戻しています") {
+        perform(String(localized: "元の画像に戻す")) {
             let result = try await editCard(deviceID, arguments: self.assetArguments(card) + ["--restore"])
             self.applyCardPreview(card.id, result)
             self.status = result.walletRestarted == true
-                ? "元の券面を戻し、Walletを再起動しました。"
-                : "元の券面を戻しました。Walletを開き直すと反映されます。"
+                ? String(localized: "元の画像に戻しました。")
+                : String(localized: "元の画像に戻しました。Walletを開き直すと反映されます。")
         }
     }
 
     func saveOriginalCard(_ card: PayCard) {
         guard let deviceID else { return }
-        perform("元の券面をMacに保存") {
+        perform(String(localized: "元の画像をMacに保存")) {
             let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: temp) }
             let result = try await editCard(deviceID, arguments: ["--card-id=\(card.id)", "--export", temp.path])
             let panel = NSSavePanel()
             panel.nameFieldStringValue = self.originalCardFileName(card, extension: result.fileExtension ?? "bin")
             panel.canCreateDirectories = true
-            panel.message = "元の画像ボタンと同じ券面を、このMacへ保存します。"
+            panel.message = String(localized: "このカードの元の画像をMacに保存します。")
             guard await panel.begin() == .OK, let url = panel.url else {
-                self.status = "保存をキャンセルしました"
+                self.status = String(localized: "保存をキャンセルしました")
                 return
             }
             try Data(contentsOf: temp).write(to: url, options: .atomic)
@@ -920,7 +923,7 @@ final class Browser {
         guard newScope != scope || target != path else { return }
         let previous = (scope, path)
         scope = newScope
-        perform(newScope == .media ? "Mediaを読み込み" : "実機階層を読み込み") {
+        perform(String(localized: "フォルダを読み込み")) {
             do {
                 try await self.load(target)
                 self.backStack.append(previous)
@@ -937,7 +940,7 @@ final class Browser {
         let current = (scope, path)
         let oldScope = scope
         scope = target.0
-        perform(target.0 == .media ? "フォルダを読み込み" : "実機階層を読み込み") {
+        perform(String(localized: "フォルダを読み込み")) {
             do {
                 try await self.load(target.1)
                 self.forwardStack.append(current)
@@ -954,7 +957,7 @@ final class Browser {
         let current = (scope, path)
         let oldScope = scope
         scope = target.0
-        perform(target.0 == .media ? "フォルダを読み込み" : "実機階層を読み込み") {
+        perform(String(localized: "フォルダを読み込み")) {
             do {
                 try await self.load(target.1)
                 self.backStack.append(current)
@@ -978,7 +981,7 @@ final class Browser {
     private func child(_ name: String, in directory: String) throws -> String {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0"),
               name.utf8.count <= 255 else {
-            throw BridgeError(message: "名前は1〜255バイトで指定してください。「/」「.」「..」は使用できません。")
+            throw BridgeError(message: String(localized: "この名前は使えません。「/」を含む名前や「.」「..」は指定できず、長すぎる名前も使えません。"))
         }
         return directory == "/" ? "/\(name)" : "\(directory)/\(name)"
     }
@@ -1016,7 +1019,7 @@ final class Browser {
         Task {
             var failures: [String] = []
             for entry in entries {
-                status = "\(label)（\(self.batchDone + 1)/\(self.batchTotal)）\(entry.name)"
+                status = String(localized: "\(label)（\(self.batchDone + 1)/\(self.batchTotal)）\(entry.name)")
                 do {
                     try await self.withTransfer {
                         self.rowActivity[entry.id] = RowActivity(fraction: nil)
@@ -1038,11 +1041,12 @@ final class Browser {
             self.batchTotal = 0
             self.busy = false
             if failures.isEmpty {
-                self.status = "\(label) — 完了"
+                self.status = String(localized: "\(label) — 完了")
             } else {
                 self.error = failures.joined(separator: "\n")
                 self.status = failures.count == entries.count
-                    ? "操作が完了しませんでした" : "一部の操作が完了しませんでした"
+                    ? String(localized: "操作を完了できませんでした")
+                    : String(localized: "一部の操作を完了できませんでした")
             }
             then?()
         }
@@ -1052,9 +1056,9 @@ final class Browser {
         rowActivity[id] = nil
         if let error {
             self.error = error
-            status = "Finderへのコピーが完了しませんでした"
+            status = String(localized: "Finderへのコピーを完了できませんでした")
         } else if self.error == nil {
-            status = "Finderへコピー — 完了"
+            status = String(localized: "Finderへのコピーが完了しました")
         }
     }
 
@@ -1070,11 +1074,11 @@ final class Browser {
         guard !blocksNewWork, let deviceID, scope != .cards, !urls.isEmpty else { return }
         let directory = path
         let scope = scope
-        perform("ファイルを受信") {
+        perform(String(localized: "ファイルを追加")) {
             let staged = try stageDroppedURLs(urls)
             defer { try? FileManager.default.removeItem(at: staged.root) }
             try await self.transmit(staged.files, to: directory, deviceID: deviceID, scope: scope)
-            self.status = "ファイルを受信"
+            self.status = String(localized: "ファイルを追加")
         }
     }
 
@@ -1083,11 +1087,11 @@ final class Browser {
         guard !providers.contains(where: { $0.registeredTypeIdentifiers.contains(deviceDragType) }) else { return }
         let directory = path
         let scope = scope
-        perform("ファイルを受信") {
+        perform(String(localized: "ファイルを追加")) {
             let staged = try await stageDropped(providers)
             defer { try? FileManager.default.removeItem(at: staged.root) }
             try await self.transmit(staged.files, to: directory, deviceID: deviceID, scope: scope)
-            self.status = "ファイルを受信"
+            self.status = String(localized: "ファイルを追加")
         }
     }
 
@@ -1105,7 +1109,7 @@ final class Browser {
             if let index = pending.firstIndex(where: { $0.id == url.path }) {
                 pending[index].fraction = nil
             }
-            status = "送信 \(url.lastPathComponent)"
+            status = String(localized: "追加中: \(url.lastPathComponent)")
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             do {
@@ -1130,11 +1134,11 @@ final class Browser {
     private func sendLocal(_ url: URL, to directory: String, deviceID: String, scope: BrowseScope) async throws {
         var directoryItem = ObjCBool(false)
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directoryItem) else {
-            throw BridgeError(message: "「\(url.lastPathComponent)」が見つかりません。")
+            throw BridgeError(message: String(localized: "「\(url.lastPathComponent)」が見つかりません。"))
         }
         let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
         if values.isSymbolicLink == true {
-            throw BridgeError(message: "「\(url.lastPathComponent)」はシンボリックリンクです。")
+            throw BridgeError(message: String(localized: "「\(url.lastPathComponent)」はエイリアス（リンク）のため追加できません。"))
         }
         if directoryItem.boolValue {
             if scope != .media {
@@ -1160,7 +1164,7 @@ final class Browser {
 
     private func save(_ entry: Entry, to destination: URL, deviceID: String, scope: BrowseScope) async throws {
         if scope == .system && entry.isDirectory && isProtectedDevicePath(entry.id) {
-            throw BridgeError(message: "「\(entry.name)」はシステム階層のため抽出できません。")
+            throw BridgeError(message: String(localized: "「\(entry.name)」は保護されたフォルダのため保存できません。"))
         }
         switch scope {
         case .media:
@@ -1173,7 +1177,7 @@ final class Browser {
                 throw error
             }
         case .cards:
-            throw BridgeError(message: "カードはこの操作の対象外です。")
+            throw BridgeError(message: String(localized: "カードではこの操作はできません。"))
         }
     }
 
@@ -1181,7 +1185,7 @@ final class Browser {
         guard let id = deviceID, scope != .cards else { return }
         let directory = path
         let scope = scope
-        perform("フォルダを作成") {
+        perform(String(localized: "フォルダを作成")) {
             if scope == .media {
                 _ = try await bridge(["mkdir", id, try self.child(name)])
             } else {
@@ -1199,7 +1203,7 @@ final class Browser {
 
     func rename(_ entry: Entry, to name: String) {
         guard canModify, let id = deviceID else { return }
-        perform("名前を変更") {
+        perform(String(localized: "名前を変更")) {
             _ = try await bridge(["rename", id, entry.id, self.child(name)])
             try await self.load(self.path)
         }
@@ -1208,7 +1212,7 @@ final class Browser {
     func remove(_ entries: [Entry]) {
         let targets = entries.filter(canDelete)
         guard let id = deviceID, !targets.isEmpty else { return }
-        performBatch("項目を削除", entries: targets) { entry in
+        performBatch(String(localized: "削除"), entries: targets) { entry in
             if self.scope == .media {
                 _ = try await bridge(["remove", id, entry.id])
             } else {
@@ -1223,18 +1227,16 @@ final class Browser {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.message = scope == .media
-            ? "現在のフォルダへ送ります。フォルダも含められます。同名は上書きしません。"
-            : "現在のフォルダへファイルまたはフォルダを書込み、内容を照合します。同名は上書きしません。"
+        panel.message = String(localized: "今開いているフォルダに追加します。同じ名前の項目がある場合は上書きしません。")
         let directory = path
         let scope = scope
-        perform("ファイルを送信") {
+        perform(String(localized: "ファイルを追加")) {
             guard await panel.begin() == .OK, !panel.urls.isEmpty else {
-                self.status = "送信をキャンセルしました"
+                self.status = String(localized: "追加をキャンセルしました")
                 return
             }
             try await self.transmit(panel.urls, to: directory, deviceID: id, scope: scope)
-            self.status = "ファイルを送信"
+            self.status = String(localized: "ファイルを追加")
         }
     }
 
@@ -1244,10 +1246,10 @@ final class Browser {
         if targets.count == 1, let only = targets.first, only.isFile {
             let panel = NSSavePanel()
             panel.nameFieldStringValue = only.name
-            panel.message = "既存ファイルとは別の名前で保存してください（上書きなし）。"
-            perform("Macに保存") {
+            panel.message = String(localized: "すでにあるファイルとは別の名前で保存してください（上書きはしません）。")
+            perform(String(localized: "Macに保存")) {
                 guard await panel.begin() == .OK, let url = panel.url else {
-                    self.status = "保存をキャンセルしました"
+                    self.status = String(localized: "保存をキャンセルしました")
                     return
                 }
                 self.rowActivity[only.id] = RowActivity(fraction: nil)
@@ -1263,19 +1265,19 @@ final class Browser {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.prompt = "保存"
-        panel.message = "選択した項目を、このフォルダの中へ同じ名前で保存します。"
+        panel.prompt = String(localized: "保存")
+        panel.message = String(localized: "選んだ項目を、このフォルダに同じ名前で保存します。")
         Task {
             guard await panel.begin() == .OK, let folder = panel.url else { return }
             guard !self.blocksNewWork else {
-                self.error = "別の処理が終わるまで待ってください。"
+                self.error = String(localized: "ほかの処理が終わるまでお待ちください。")
                 return
             }
             let saved = URLBox()
-            self.performBatch("Macに保存", entries: targets, refresh: false) { entry in
+            self.performBatch(String(localized: "Macに保存"), entries: targets, refresh: false) { entry in
                 let destination = folder.appendingPathComponent(entry.name)
                 if FileManager.default.fileExists(atPath: destination.path) {
-                    throw BridgeError(message: "「\(entry.name)」は保存先に既にあります。上書きしません。")
+                    throw BridgeError(message: String(localized: "「\(entry.name)」は保存先にすでにあるため、上書きしませんでした。"))
                 }
                 try await self.save(entry, to: destination, deviceID: id, scope: self.scope)
                 saved.items.append(destination)
@@ -1287,7 +1289,7 @@ final class Browser {
 
     func runPoC(target: String) {
         guard let id = deviceID else { return }
-        perform("AirTrafficサンドボックス境界を検証") {
+        perform(String(localized: "書き込みテスト")) {
             self.pocResult = try await runPoCProcess(id, target: target)
         }
     }
@@ -1523,10 +1525,10 @@ final class FinderDragMonitorView: NSView, NSDraggingSource {
 
 private func writeFinderExport(_ request: ExportRequest, to destination: URL) async throws {
     if request.scope == .system && request.entry.isDirectory && isProtectedDevicePath(request.entry.id) {
-        throw BridgeError(message: "「\(request.entry.name)」はシステム階層のため抽出できません。")
+        throw BridgeError(message: String(localized: "「\(request.entry.name)」は保護されたフォルダのため保存できません。"))
     }
     if FileManager.default.fileExists(atPath: destination.path) {
-        throw BridgeError(message: "「\(request.entry.name)」は保存先に既にあります。上書きしません。")
+        throw BridgeError(message: String(localized: "「\(request.entry.name)」は保存先にすでにあるため、上書きしませんでした。"))
     }
     switch request.scope {
     case .media:
@@ -1539,7 +1541,7 @@ private func writeFinderExport(_ request: ExportRequest, to destination: URL) as
             throw error
         }
     case .cards:
-        throw BridgeError(message: "カードはこの操作の対象外です。")
+        throw BridgeError(message: String(localized: "カードではこの操作はできません。"))
     }
 }
 

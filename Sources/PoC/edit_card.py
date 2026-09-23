@@ -24,7 +24,7 @@ PNG_MAGIC = list_cards.PNG_MAGIC
 
 def fit_cover(source: Path, width: int, height: int, output: Path) -> None:
     if width < 1 or height < 1 or width > 8000 or height > 8000:
-        raise ValueError("券面サイズが不正です。")
+        raise ValueError("Invalid card image size.")
     with tempfile.TemporaryDirectory(prefix="airlift-fit-") as temporary:
         temp = Path(temporary)
         raster = temp / "source.png"
@@ -35,10 +35,10 @@ def fit_cover(source: Path, width: int, height: int, output: Path) -> None:
                 ["/usr/bin/sips", "-s", "format", "png", os.fspath(source), "--out", os.fspath(raster)],
                 check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
             if completed.returncode != 0 or not raster.is_file():
-                raise ValueError("選択した画像を読み込めませんでした。")
+                raise ValueError("Couldn't read the selected image.")
         size = list_cards.image_size(raster)
         if not size:
-            raise ValueError("選択した画像のサイズを読み取れませんでした。")
+            raise ValueError("Couldn't read the size of the selected image.")
         scale = max(width / float(size[0]), height / float(size[1]))
         resized_width = max(width, int(round(size[0] * scale)))
         resized_height = max(height, int(round(size[1] * scale)))
@@ -62,33 +62,33 @@ def fit_cover(source: Path, width: int, height: int, output: Path) -> None:
     data = output.read_bytes()
     if output.suffix.lower() == ".pdf":
         if not data.startswith(b"%PDF-"):
-            raise ValueError("差し替え用データがPDFではありません。")
+            raise ValueError("The replacement isn't a PDF.")
     elif not data.startswith(PNG_MAGIC):
-        raise ValueError("差し替え用データがPNGではありません。")
+        raise ValueError("The replacement isn't a PNG.")
     if len(data) > 16 * 1024 * 1024:
-        raise ValueError("差し替え用データが大きすぎます。")
+        raise ValueError("The replacement is too large.")
 
 
 def safe_card_id(card_id):
     if not card_id or card_id in (".", "..") or "/" in card_id or "\0" in card_id or len(card_id.encode()) > 255:
-        raise ValueError("カードIDが不正です。")
+        raise ValueError("Invalid card ID.")
     return card_id
 
 
 def parse_asset(text):
     name, width_text, height_text = text.rsplit(":", 2)
     if name not in ARTWORK:
-        raise ValueError("券面ファイル名が不正です。")
+        raise ValueError("Invalid card image file name.")
     width, height = int(width_text), int(height_text)
     if width < 1 or height < 1 or width > 8000 or height > 8000:
-        raise ValueError("券面サイズが不正です。")
+        raise ValueError("Invalid card image size.")
     return {"name": name, "width": width, "height": height}
 
 
 def bridge(udid, *arguments):
     result = airlift.run_json([os.fspath(BRIDGE), *arguments[:1], udid, *arguments[1:]], timeout=60)
     if not list_cards.host_ok(result):
-        raise airlift.AirLiftError(result.get("error") or "端末操作に失敗しました。")
+        raise airlift.AirLiftError(result.get("error") or "The operation on the device failed.")
     return result
 
 
@@ -104,9 +104,9 @@ def staged_names(device_id):
 def exchange_file(device_id, directory, name, payload):
     """Replace one existing file in a single AirTraffic sync and verify the bytes."""
     if name not in ARTWORK and name not in list_cards.CACHE_LEAVES:
-        raise ValueError("券面データが不正です。")
+        raise ValueError("Invalid card image data.")
     if not payload or len(payload) > 32 * 1024 * 1024:
-        raise ValueError("券面データが大きすぎます。")
+        raise ValueError("The card image data is too large.")
     directory = airlift.normalize_target(directory)
     udid, source, link, recovered = staged_names(device_id)
     link_id = "../../%s/p0/p1/p2/link" % source
@@ -129,14 +129,14 @@ def exchange_file(device_id, directory, name, payload):
             [link_id, target_id, payload_id, lexical_id, restore_id]))
         airlift.preflight(udid)
         if not airlift.operation_ok(airlift.native("snapshot-books", udid, os.fspath(snapshot_root))):
-            raise airlift.AirLiftError("Books同期状態を保存できませんでした。")
+            raise airlift.AirLiftError("Couldn't save the Books sync state.")
         stage = airlift.native(
             "stage", udid, source, link, recovered,
             os.fspath(work / "payload.zip"), os.fspath(work / "Books.plist"),
             os.fspath(snapshot_root))
         cleanup_authorized = bool(stage.get("operation", {}).get("cleanupAuthorized"))
         if not airlift.operation_ok(stage):
-            raise airlift.AirLiftError("券面書き込みの準備に失敗しました。")
+            raise airlift.AirLiftError("Couldn't prepare to write the card image.")
         original = b""
         moved = False
         verified = False
@@ -182,7 +182,7 @@ def exchange_file(device_id, directory, name, payload):
                     os.fspath(BRIDGE), "finish-write", udid, source, link, recovered,
                     os.fspath(expected), directory[1:], name, os.fspath(snapshot_root)], timeout=90)
         if not verified or not restored:
-            raise airlift.AirLiftError("差し替えた券面を確認できませんでした。")
+            raise airlift.AirLiftError("Couldn't confirm the replaced card image.")
 
 
 def copy_file(device_id, target, local_path):
@@ -201,13 +201,13 @@ def copy_file(device_id, target, local_path):
         books.write_bytes(airlift.build_books([link_id, target_id, restore_id]))
         airlift.preflight(udid)
         if not airlift.operation_ok(airlift.native("snapshot-books", udid, os.fspath(snapshot_root))):
-            raise airlift.AirLiftError("Books同期状態を保存できませんでした。")
+            raise airlift.AirLiftError("Couldn't save the Books sync state.")
         stage = airlift.native(
             "stage", udid, source, link, recovered,
             os.fspath(archive), os.fspath(books), os.fspath(snapshot_root))
         cleanup_authorized = bool(stage.get("operation", {}).get("cleanupAuthorized"))
         if not airlift.operation_ok(stage):
-            raise airlift.AirLiftError("ファイル読み出しの準備に失敗しました。")
+            raise airlift.AirLiftError("Couldn't prepare to read the file.")
         copied = False
         back = False
 
@@ -236,7 +236,7 @@ def copy_file(device_id, target, local_path):
                     os.fspath(BRIDGE), "finish-delete", udid, source, link, recovered,
                     os.fspath(snapshot_root), "cleanup"], timeout=90)
         if not copied:
-            raise airlift.AirLiftError("ファイルを読み出せませんでした。")
+            raise airlift.AirLiftError("Couldn't read the file.")
 
 
 def remove_file(device_id, target):
@@ -348,7 +348,7 @@ def sniff_extension(payload):
 
 def run_export(device_id, card_id, destination):
     if not isinstance(destination, str) or "\0" in destination or not os.path.isabs(destination):
-        raise ValueError("保存先が不正です。")
+        raise ValueError("Invalid save location.")
     payload = download_original(read_original_url(device_id, card_id))
     Path(destination).write_bytes(payload)
     return {"ok": True, "fileExtension": sniff_extension(payload)}
@@ -356,12 +356,12 @@ def run_export(device_id, card_id, destination):
 
 def download_original(url):
     if not isinstance(url, str) or not url.startswith("https://") or len(url) > 2000:
-        raise ValueError("元画像のURLがhttpsではありません。")
+        raise ValueError("The original image URL isn't https.")
     request = urllib.request.Request(url, headers={"User-Agent": "AirliftBrowser"})
     with urllib.request.urlopen(request, timeout=60) as response:
         payload = response.read(16 * 1024 * 1024 + 1)
     if not payload or len(payload) > 16 * 1024 * 1024:
-        raise ValueError("元画像のサイズが不正です。")
+        raise ValueError("The original image has an invalid size.")
     return payload
 
 
@@ -383,7 +383,7 @@ def read_original_url(device_id, card_id):
                 continue
             if found:
                 return found
-    raise RuntimeError("元画像のURLが券面データにありません。")
+    raise RuntimeError("The card data doesn't include the original image URL.")
 
 
 def restart_wallet(device_id):
@@ -496,17 +496,17 @@ def main():
     try:
         if args.export:
             if not args.device or not args.card_id:
-                raise ValueError("カードを指定してください。")
+                raise ValueError("Choose a card.")
             result = run_export(args.device, args.card_id, args.export)
         else:
             assets = [parse_asset(item) for item in args.asset]
             if not args.device or not args.card_id or not assets:
-                raise ValueError("カードと券面ファイルを指定してください。")
+                raise ValueError("Choose a card and a card image file.")
             if args.restore:
                 result = run_restore(args.device, args.card_id, assets)
             else:
                 if not args.image:
-                    raise ValueError("差し替える画像を指定してください。")
+                    raise ValueError("Choose a replacement image.")
                 result = run_replace(args.device, args.card_id, assets, args.image)
     except Exception as error:
         result = {"ok": False, "error": str(error)}

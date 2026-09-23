@@ -8,13 +8,15 @@ struct AppActionsView: View {
     var body: some View {
         Form {
             AppRegionActionsView(manager: manager, kind: "data", title: "データ")
-            AppRegionActionsView(manager: manager, kind: "group", title: "App Group")
+            AppRegionActionsView(manager: manager, kind: "group", title: "共有データ")
             AppRegionActionsView(manager: manager, kind: "bundle", title: "アプリ本体")
             Section("バックアップ") {
-                AppActionRow(title: "バックアップ…", subtitle: "保存する領域を選び、Macにバックアップを作成します。",
+                AppActionRow(title: String(localized: "バックアップ…"),
+                             subtitle: String(localized: "保存するものを選んで、Macにバックアップを作ります。"),
                              systemImage: "archivebox") { showBackup = true }
                     .disabled(manager.regions.isEmpty)
-                AppActionRow(title: "リストア…", subtitle: "このアプリのバックアップ履歴から復元します。",
+                AppActionRow(title: String(localized: "復元…"),
+                             subtitle: String(localized: "このアプリのバックアップから復元します。"),
                              systemImage: "arrow.uturn.backward") { showRestore = true }
             }
         }

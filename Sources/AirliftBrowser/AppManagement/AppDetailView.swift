@@ -26,7 +26,7 @@ struct AppDetailView: View {
                 }
                 Spacer()
                 if !manager.libraryMode, history || manager.regionID != nil {
-                    Button("操作を選択", systemImage: "chevron.backward") {
+                    Button("操作一覧に戻る", systemImage: "chevron.backward") {
                         manager.showAppActions()
                         history = false
                     }
@@ -36,8 +36,8 @@ struct AppDetailView: View {
             Divider()
             if history && !manager.libraryMode {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("リストア").font(.headline)
-                    Text("復元するバックアップを選択してください。")
+                    Text("復元").font(.headline)
+                    Text("復元するバックアップを選んでください。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(16)
                 AppHistoryView(manager: manager, restoreSource: $restoreSource)
@@ -45,14 +45,14 @@ struct AppDetailView: View {
                 AppActionsView(manager: manager, showBackup: $showBackup, showRestore: $history)
             } else {
                 HStack {
-                    Picker("領域", selection: $manager.regionID) {
+                    Picker("場所", selection: $manager.regionID) {
                         ForEach(manager.regions) { region in
                             Label(region.name, systemImage: region.symbol).tag(Optional(region.id))
                         }
                     }.frame(maxWidth: 430)
                     Spacer()
                     if manager.libraryMode {
-                        Text("編集すると新しい履歴として保存").font(.caption).foregroundStyle(.secondary)
+                        Text("編集すると新しいバックアップとして保存されます").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 10)
                     .disabled(manager.busy)

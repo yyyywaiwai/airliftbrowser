@@ -20,14 +20,14 @@ struct AppHistoryView: View {
                     Spacer()
                     Text(ByteCountFormatter.string(fromByteCount: backup.totalBytes, countStyle: .file))
                     Menu("書き出し") {
-                        Button("Airliftバックアップ…") { manager.exportBackup(backup, xcappdata: false) }
-                        Button("xcappdata…") { manager.exportBackup(backup, xcappdata: true) }
+                        Button("Airlift形式…") { manager.exportBackup(backup, xcappdata: false) }
+                        Button("Xcode形式（.xcappdata）…") { manager.exportBackup(backup, xcappdata: true) }
                             .disabled(!backup.regions.contains { $0.kind == "data" })
                     }
-                    Button("リストア") { restoreSource = backup }
+                    Button("復元") { restoreSource = backup }
                         .disabled(manager.deviceID == nil || !backup.canRestore)
                     Button("削除", systemImage: "trash", role: .destructive) { manager.deleteBackup(backup) }
-                        .labelStyle(.iconOnly).help("バックアップをゴミ箱に移動")
+                        .labelStyle(.iconOnly).help("このバックアップをゴミ箱に入れます")
                 }.padding(.vertical, 8)
                     .contextMenu {
                         AppBackupMenu(manager: manager, backup: backup, restoreSource: $restoreSource)
@@ -38,7 +38,7 @@ struct AppHistoryView: View {
         .overlay {
             if backups.isEmpty {
                 ContentUnavailableView("バックアップはありません", systemImage: "archivebox",
-                                       description: Text("ツールバーから対象を選んでバックアップできます。"))
+                                       description: Text("ツールバーの「バックアップ」から作成できます。"))
             }
         }
     }

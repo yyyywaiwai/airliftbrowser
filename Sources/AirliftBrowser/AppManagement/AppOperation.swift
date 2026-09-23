@@ -8,16 +8,13 @@ final class AppOperation: Identifiable {
     let appName: String
     let started = Date.now
     var finished: Date?
-    var message = "準備しています…"
+    var message = String(localized: "準備しています…")
     var phase = "prepare"
     var region: String?
     var regionIndex: Int?
     var regionCount: Int?
     var completed: Int64?
     var total: Int64?
-    var chunkSize: Int64?
-    var chunkIndex: Int64?
-    var chunkCount: Int64?
     var bytesPerSecond: Double?
     var cancelling = false
     var failed = false
@@ -42,11 +39,11 @@ final class AppOperation: Identifiable {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appending(path: "\(id.uuidString).log")
             guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-                throw AppServiceError("ログファイルを作成できません。")
+                throw AppServiceError(String(localized: "ログファイルを作成できません。"))
             }
             logHandle = try FileHandle(forWritingTo: url)
             logURL = url
-        } catch { append("ログの保存先を開けません: \(error.localizedDescription)") }
+        } catch { append(String(localized: "ログの保存先を開けません: \(error.localizedDescription)")) }
         append("\(title) — \(appName)")
     }
 
@@ -57,17 +54,17 @@ final class AppOperation: Identifiable {
     }
     var stageName: String {
         switch phase {
-        case "receive": "分割受信中"
-        case "send": "分割送信中"
-        case "verify-device": "端末データを照合中"
-        case "verify-local": "バックアップを照合中"
-        case "device-copy": "端末内でアプリ本体をコピー中"
-        case "return": "コンテナを復帰中"
-        case "cleanup": "一時データを片付け中"
-        case "manifest": "バックアップの索引を保存中"
-        case "scan": "ファイル一覧・容量を集計中"
-        case "done": failed ? "処理を完了できませんでした" : "完了"
-        default: steps.first(where: { $0.state == "running" })?.title ?? "準備中"
+        case "receive": String(localized: "受信中")
+        case "send": String(localized: "送信中")
+        case "verify-device": String(localized: "デバイス上の内容を確認中")
+        case "verify-local": String(localized: "バックアップの内容を確認中")
+        case "device-copy": String(localized: "デバイス内でコピー中")
+        case "return": String(localized: "データを元の場所に戻しています")
+        case "cleanup": String(localized: "後片付け中")
+        case "manifest": String(localized: "バックアップ情報を保存中")
+        case "scan": String(localized: "ファイルを確認中")
+        case "done": failed ? String(localized: "処理を完了できませんでした") : String(localized: "完了")
+        default: steps.first(where: { $0.state == "running" })?.title ?? String(localized: "準備中")
         }
     }
 
@@ -82,9 +79,6 @@ final class AppOperation: Identifiable {
         regionCount = response.regionCount
         completed = response.completed
         total = response.total
-        chunkSize = response.chunkSize
-        chunkIndex = response.chunkIndex
-        chunkCount = response.chunkCount
         let key = "\(phase):\(message)"
         if let completed {
             if let sample = lastSample, sample.key == key, completed >= sample.bytes {
@@ -114,7 +108,7 @@ final class AppOperation: Identifiable {
             catch {
                 try? handle.close()
                 logHandle = nil
-                logs.append(AppOperationLog(message: "ログへの書き込み失敗: \(error.localizedDescription)"))
+                logs.append(AppOperationLog(message: String(localized: "ログに書き込めませんでした: \(error.localizedDescription)")))
             }
         }
     }

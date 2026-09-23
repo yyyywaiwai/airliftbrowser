@@ -16,7 +16,7 @@ struct AppFilesView: View {
                 }.labelStyle(.iconOnly).disabled(manager.relativePath.isEmpty)
                 ScrollView(.horizontal) {
                     HStack(spacing: 5) {
-                        Button("ルート") { manager.navigate("") }
+                        Button("最上位") { manager.navigate("") }
                         let parts = manager.relativePath.split(separator: "/").map(String.init)
                         ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
@@ -61,7 +61,7 @@ struct AppFilesView: View {
                 .overlay(AppFinderDragMonitor(manager: manager, files: manager.visibleFiles))
                 .overlay {
                     if manager.visibleFiles.isEmpty && !manager.busy {
-                        ContentUnavailableView(manager.fileListingError != nil ? "一覧を取得できませんでした" : manager.fileSearch.isEmpty ? "項目はありません" : "一致する項目はありません",
+                        ContentUnavailableView(manager.fileListingError != nil ? "一覧を読み込めませんでした" : manager.fileSearch.isEmpty ? "このフォルダは空です" : "一致する項目はありません",
                                                systemImage: "folder", description: Text(manager.fileListingError ?? ""))
                             .allowsHitTesting(false)
                     }
@@ -73,12 +73,12 @@ struct AppFilesView: View {
                     if let file = manager.selectedFile, file.isDirectory { manager.navigate(file.id) }
                 }
                 .disabled(manager.selectedFile?.isDirectory != true)
-                Button("フォルダ作成", systemImage: "folder.badge.plus") {
+                Button("新規フォルダ", systemImage: "folder.badge.plus") {
                     renameFile = nil; newName = ""; showName = true
                 }.disabled(!manager.canEdit)
-                Menu("送信", systemImage: "square.and.arrow.up") {
-                    Button("ファイル／フォルダを追加…") { manager.upload(overwrite: false) }
-                    Button("同名項目を上書きして送信…") { manager.upload(overwrite: true) }
+                Menu("追加", systemImage: "square.and.arrow.up") {
+                    Button("ファイルやフォルダを追加…") { manager.upload(overwrite: false) }
+                    Button("同じ名前の項目を上書きして追加…") { manager.upload(overwrite: true) }
                 }.disabled(!manager.canEdit)
                 Button("Macに保存", systemImage: "square.and.arrow.down") {
                     if let file = manager.selectedFile { manager.exportFile(file) }
@@ -90,7 +90,7 @@ struct AppFilesView: View {
         }
         .sheet(isPresented: $showName) {
             VStack(alignment: .leading, spacing: 16) {
-                Text(renameFile == nil ? "フォルダを作成" : "名前を変更").font(.headline)
+                Text(renameFile == nil ? "新規フォルダ" : "名前を変更").font(.headline)
                 TextField("名前", text: $newName).textFieldStyle(.roundedBorder)
                 HStack {
                     Spacer()

@@ -26,7 +26,7 @@ def ensure_python():
         for candidate in ("/opt/homebrew/bin/python3", "/usr/local/bin/python3"):
             if candidate != sys.executable and os.access(candidate, os.X_OK):
                 os.execv(candidate, [candidate, "-B", *sys.argv])
-        raise RuntimeError("pymobiledevice3を利用できるPython 3が必要です。")
+        raise RuntimeError("Python 3 with pymobiledevice3 is required.")
 
 
 def local_region(request):
@@ -34,7 +34,7 @@ def local_region(request):
     manifest = storage.load(path)
     item = next((r for r in manifest["regions"] if r["id"] == request["regionID"]), None)
     if not item:
-        raise ValueError("バックアップに指定の領域がありません。")
+        raise ValueError("The backup doesn't contain the selected area.")
     return path, manifest, item, child(path, item["folder"])
 
 
@@ -57,7 +57,7 @@ async def listing_remote(lease, rel):
     for name in await afc.listdir(root):
         relative(name)
         if "/" in name:
-            raise ValueError("ファイル名が不正です。")
+            raise ValueError("Invalid file name.")
         info = await afc.stat(posixpath.join(root, name))
         kind = {"S_IFDIR": "directory", "S_IFREG": "file", "S_IFLNK": "link"}.get(info["st_ifmt"], "other")
         entries.append({"id": posixpath.join(rel, name), "name": name, "kind": kind,
@@ -91,7 +91,7 @@ def local_mutation(request, reporter):
     rel = relative(request.get("relative", ""))
     operation = request["operation"]
     if not rel or rel.split("/")[0] in MANAGED_NAMES:
-        raise ValueError("コンテナルート・識別情報は変更できません。")
+        raise ValueError("The container's top folder and identity files can't be changed.")
     path, result = storage.clone(original, reporter)
     try:
         edited = next(r for r in result["regions"] if r["id"] == item["id"])
@@ -105,21 +105,21 @@ def local_mutation(request, reporter):
         elif operation == "rename":
             target = child(base, relative(request["destination"]), allow_leaf_link=True)
             if target.exists() or target.is_symlink():
-                raise ValueError("同名の項目があります。")
+                raise ValueError("An item with the same name already exists.")
             destination.rename(target)
         elif operation == "mkdir":
             destination.mkdir()
         elif operation == "upload":
             if destination.exists() or destination.is_symlink():
                 if not request.get("overwrite"):
-                    raise ValueError("同名の項目があります。上書きを選択してください。")
+                    raise ValueError("An item with the same name already exists. Choose to replace it.")
                 if destination.is_dir() and not destination.is_symlink():
                     shutil.rmtree(destination)
                 else:
                     destination.unlink()
             storage.copy_tree(request["local"], destination, reporter)
         else:
-            raise ValueError("不明な編集操作です。")
+            raise ValueError("Unknown edit action.")
         edited["entries"] = storage.inventory(base, reporter)
         return {"backup": storage.finish(path, result)}
     except BaseException:
@@ -131,12 +131,12 @@ async def remote_mutation(request, lease, reporter):
     import transport
     rel = relative(request.get("relative", ""))
     if not rel or rel.split("/")[0] in MANAGED_NAMES:
-        raise ValueError("コンテナルート・識別情報は変更できません。")
+        raise ValueError("The container's top folder and identity files can't be changed.")
     operation = request["operation"]
     remote = await lease.path(rel, True)
     if operation == "delete":
         if not await lease.afc.exists(remote):
-            raise ValueError("対象が見つかりません。")
+            raise ValueError("Couldn't find the item.")
         await lease.replace(rel)
     elif operation == "upload":
         await lease.upload(request["local"], rel, request.get("overwrite", False))
@@ -146,10 +146,10 @@ async def remote_mutation(request, lease, reporter):
     elif operation == "rename":
         target_rel = relative(request["destination"])
         if target_rel.startswith(rel + "/"):
-            raise ValueError("フォルダ自身の中には移動できません。")
+            raise ValueError("A folder can't be moved into itself.")
         target = await lease.path(target_rel, True)
         if await lease.afc.exists(target):
-            raise ValueError("同名の項目があります。")
+            raise ValueError("An item with the same name already exists.")
         # Original stays in undo; copy to a prepared path, then remove the source.
         with tempfile.TemporaryDirectory(prefix="airlift-rename-") as temporary:
             local = Path(temporary) / "item"
@@ -157,22 +157,22 @@ async def remote_mutation(request, lease, reporter):
             await lease.upload(local, target_rel)
             await lease.replace(rel)
     else:
-        raise ValueError("不明な編集操作です。")
+        raise ValueError("Unknown edit action.")
     return {}
 
 
 def operation_steps(regions, backup=False):
-    steps = [("prepare", "準備・アプリ情報の確認")]
+    steps = [("prepare", "Preparing")]
     if not backup:
-        steps.append(("validate", "バックアップの内容検証"))
+        steps.append(("validate", "Verifying backup"))
     for index, region in enumerate(regions, 1):
         prefix = f"{index}:"
-        for key, title in [("connect", "コンテナ接続"), ("scan", "ファイル一覧・容量の集計"),
-                           ("transfer", "分割受信" if backup else "分割送信"),
-                           ("verify", "保存内容の検証" if backup else "復元内容の検証"),
-                           ("return", "コンテナの復帰"), ("cleanup", "後片付け")]:
+        for key, title in [("connect", "Connecting"), ("scan", "Counting files"),
+                           ("transfer", "Receiving files" if backup else "Sending files"),
+                           ("verify", "Verifying saved data" if backup else "Verifying restored data"),
+                           ("return", "Returning container"), ("cleanup", "Cleaning up")]:
             steps.append((prefix + key, region["name"] + " · " + title))
-    steps.append(("finish", "バックアップの索引を保存" if backup else "復元結果を保存"))
+    steps.append(("finish", "Saving backup index" if backup else "Saving results"))
     return steps
 
 
@@ -182,10 +182,10 @@ async def backup(request, reporter):
     app, device_info = await catalog.resolve(request["device"], request["appID"])
     kinds = request.get("regionKinds", ["data", "group", "bundle"])
     if not isinstance(kinds, list) or not kinds or any(kind not in ("data", "group", "bundle") for kind in kinds):
-        raise ValueError("バックアップ対象を選択してください。")
+        raise ValueError("Choose what to back up.")
     regions = [item for item in app["regions"] if item["kind"] in kinds]
     if not regions:
-        raise ValueError("選択した対象には取得可能なコンテナがありません。")
+        raise ValueError("There's nothing to back up in the selected items.")
     reporter.plan(operation_steps(regions, backup=True))
     reporter.begin("prepare")
     await transport.quiesce(request["device"], app, reporter)
@@ -197,7 +197,7 @@ async def backup(request, reporter):
         async with transport.connection(request["device"]) as afc:
             for index, item in enumerate(regions, 1):
                 reporter.set_region(item["name"], index, len(regions))
-                reporter.progress("バックアップ: " + item["name"], force=True, phase="prepare")
+                reporter.progress("Backing up: " + item["name"], force=True, phase="prepare")
                 destination = child(path, storage.region_folder(item))
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 try:
@@ -223,7 +223,7 @@ async def backup(request, reporter):
                             entries = storage.inventory(destination, reporter)
                             for entry in entries:
                                 if entry["kind"] == "file" and entry["sha256"] != verified_hashes[str(destination / entry["path"])][3]:
-                                    raise IOError("保存した内容が受信データと一致しません: " + entry["path"])
+                                    raise IOError("Saved data doesn't match what was received: " + entry["path"])
                             reporter.end()
                         else:
                             reporter.skip(prefix + "verify")
@@ -231,7 +231,7 @@ async def backup(request, reporter):
                     manifest["regions"].append({**item, "folder": storage.region_folder(item), "entries": entries,
                                                 "issues": file_issues})
                     manifest["issues"].extend(f'{item["name"]}: {issue["path"]}: {issue["error"]}' for issue in file_issues)
-                    message = "領域の一部を保存（未取得あり）: " if file_issues else "領域の保存完了: "
+                    message = "Partly saved (some files skipped): " if file_issues else "Saved: "
                     reporter.progress(message + item["name"], force=True, phase="manifest")
                 except Exception as error:
                     reporter.fail_remaining(f"{index}:")
@@ -239,7 +239,7 @@ async def backup(request, reporter):
                     if isinstance(error, Cancelled):
                         raise
                     manifest["issues"].append(item["name"] + ": " + (str(error) or type(error).__name__))
-                    reporter.progress("領域の取得失敗: " + manifest["issues"][-1], force=True, phase="warning")
+                    reporter.progress("Couldn't back up: " + manifest["issues"][-1], force=True, phase="warning")
                     if transport.pending(request["device"]):
                         raise
                 atomic_json(path / storage.MANIFEST, manifest)
@@ -258,23 +258,23 @@ async def restore(request, reporter):
     verify = request.get("verify", True)
     manifest = storage.load(request["backupPath"], verify=False, reporter=reporter)
     if manifest["status"] == "incomplete":
-        raise ValueError("未完了のバックアップは復元できません。保存済みのバックアップを選択してください。")
+        raise ValueError("An incomplete backup can't be restored. Choose a completed backup.")
     if request.get("mode", "replace") not in ("replace", "merge"):
-        raise ValueError("復元方法が不正です。")
+        raise ValueError("Invalid restore method.")
     app, _ = await catalog.resolve(request["device"], request["appID"])
     mappings = request.get("mappings", {})
     if not mappings:
-        raise ValueError("復元する領域を選択してください。")
+        raise ValueError("Choose what to restore.")
     if len(set(mappings.values())) != len(mappings):
-        raise ValueError("同じ復元先に複数の領域は指定できません。")
+        raise ValueError("Multiple items can't be restored to the same destination.")
     plan = []
     for source_id, target_id in mappings.items():
         source = next((r for r in manifest["regions"] if r["id"] == source_id), None)
         target = next((r for r in app["regions"] if r["id"] == target_id), None)
         if not source or not target or source["kind"] != target["kind"] or source["kind"] == "bundle":
-            raise ValueError("復元先の領域の組み合わせが不正です。")
+            raise ValueError("These items can't be restored to the selected destination.")
         if source.get("issues") and request.get("mode", "replace") == "replace":
-            raise ValueError("未取得ファイルを含む領域は置換復元できません。既存ファイルを残すマージ復元を選択してください。")
+            raise ValueError("This backup is missing some files, so it can't replace existing data. Choose 'Add & Replace', which keeps existing files.")
         plan.append((source, target))
     reporter.plan(operation_steps([target for _, target in plan]))
     reporter.begin("prepare")
@@ -293,8 +293,8 @@ async def restore(request, reporter):
             needed = sum(entry["size"] for entry in source["entries"] if entry["kind"] == "file")
             free = int((await afc.get_device_info())["FSFreeBytes"])
             if free < needed + 64 * 1024**2:
-                raise ValueError("端末の空き容量が不足しています。復元データの一時配置に " + str(needed) + " バイト必要です。")
-            reporter.progress("復元: " + target["name"], force=True)
+                raise ValueError("Not enough free space on the device. Restoring needs " + str(needed) + " bytes of temporary space.")
+            reporter.progress("Restoring: " + target["name"], force=True)
             local = child(request["backupPath"], source["folder"])
             try:
                 prefix = f"{index}:"
@@ -320,15 +320,15 @@ async def restore(request, reporter):
                     else:
                         reporter.skip(prefix + "verify")
                 completed.append(target["name"])
-                reporter.progress("領域の復元完了: " + target["name"], force=True)
+                reporter.progress("Restored: " + target["name"], force=True)
             except Exception as error:
                 reporter.fail_remaining(f"{index}:")
-                reporter.progress("復元工程を中断: " + target["name"], force=True, cancellable=False)
-                raise RuntimeError("復元に失敗: " + target["name"] + "。完了した領域: "
-                                   + (", ".join(completed) or "なし") + "。" + str(error)) from error
+                reporter.progress("Restore stopped: " + target["name"], force=True, cancellable=False)
+                raise RuntimeError("Restore failed: " + target["name"] + ". Completed: "
+                                   + (", ".join(completed) or "none") + ". " + str(error)) from error
     reporter.begin("finish")
     reporter.end()
-    return {"message": ("復元・内容照合が完了しました: " if verify else "復元が完了しました（内容検証なし）: ") + ", ".join(completed)}
+    return {"message": ("Restore and verification complete: " if verify else "Restore complete (not verified): ") + ", ".join(completed)}
 
 
 async def restore_children(lease, local, prefix, mode, defer_verification=False):
@@ -353,7 +353,7 @@ async def verify_restore(lease, local, prefix, mode, expected_hashes=None):
         names -= MANAGED_NAMES
         expected -= MANAGED_NAMES
     if (mode == "replace" and names != expected) or not expected.issubset(names):
-        raise IOError("復元後のファイル一覧が一致しません。")
+        raise IOError("The restored files don't match the backup.")
     for item in local.iterdir():
         if not prefix and item.name in MANAGED_NAMES:
             continue
@@ -362,11 +362,11 @@ async def verify_restore(lease, local, prefix, mode, expected_hashes=None):
         metadata = await lease.afc.stat(path)
         if item.is_symlink():
             if metadata["st_ifmt"] != "S_IFLNK" or metadata.get("LinkTarget") != os.readlink(item):
-                raise IOError("リンクの内容が一致しません。")
+                raise IOError("A restored link doesn't match the backup.")
         elif item.is_dir():
             await verify_restore(lease, item, rel, mode, expected_hashes)
         elif await transport.file_hash(lease.afc, path, lease.reporter) != (expected_hashes[rel] if expected_hashes is not None else sha256(item, lease.reporter)):
-            raise IOError("復元後の内容が一致しません: " + rel)
+            raise IOError("Restored content doesn't match the backup: " + rel)
 
 
 async def dispatch(request, reporter):
@@ -421,13 +421,13 @@ async def dispatch(request, reporter):
                                               "local": local}), flush=True)
         return {"local": request["local"]} if action == "icon" else {}
     if transport.pending(request["device"]):
-        raise ValueError("この端末には未完了の操作があります。先に『未完了操作を復旧』を実行してください。")
+        raise ValueError("This device has unfinished tasks. Run 'Recover Unfinished Tasks' first.")
     if action == "backup":
         return await backup(request, reporter)
     if action == "restore":
         return await restore(request, reporter)
     if action not in ("list", "list-tree", "get", "mutate"):
-        raise ValueError("不明な操作です。")
+        raise ValueError("Unknown action.")
     app, item = await catalog.resolve(request["device"], request["appID"], request["regionID"])
     await transport.quiesce(request["device"], app, reporter)
     async with transport.connection(request["device"]) as afc:
@@ -438,9 +438,9 @@ async def dispatch(request, reporter):
                 rel = relative(request["relative"])
                 scoped_copy = item["kind"] == "bundle" and bool(rel)
                 if scoped_copy and not request.get("file"):
-                    raise ValueError("取得対象の一覧情報が必要です。一覧を更新してください。")
+                    raise ValueError("Item details are missing. Please refresh the list.")
                 if scoped_copy and request.get("containerPath") not in (None, item["path"]):
-                    raise ValueError("アプリ本体の場所が変更されました。一覧を更新してください。")
+                    raise ValueError("The app's location has changed. Please refresh the list.")
                 async with transport.Lease(request["device"], item["path"], reporter, afc,
                                            selection=rel if scoped_copy else "",
                                            copy_file=request["file"] if scoped_copy else None,
@@ -459,7 +459,7 @@ async def dispatch(request, reporter):
                 return await listing_remote(lease, relative(request.get("relative", "")))
             if action == "mutate":
                 return await remote_mutation(request, lease, reporter)
-    raise ValueError("不明な操作です。")
+    raise ValueError("Unknown action.")
 
 
 def main():
@@ -473,7 +473,10 @@ def main():
         try:
             # SpringBoard icons are read-only and do not use container leases.
             if request["action"] not in ("icon", "icons"):
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise RuntimeError("Another task is still running. Wait for it to finish, then try again.") from None
             result = asyncio.run(dispatch(request, reporter))
             print(json.dumps({"event": "result", "ok": True, **result}, ensure_ascii=False), flush=True)
             return 0

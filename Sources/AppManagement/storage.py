@@ -33,7 +33,7 @@ def inventory(root, reporter=None, verified_hashes=None):
                 digest = cached[3] if cached and cached[:3] == identity else sha256(item, reporter)
                 row.update(kind="file", sha256=digest)
             else:
-                raise ValueError("保存できないファイル種類: " + rel)
+                raise ValueError("This file type can't be saved: " + rel)
             entries.append(row)
             if row["kind"] == "directory":
                 walk(item, rel + "/")
@@ -72,29 +72,29 @@ def create(app, device, origin="device"):
 def load(path, verify=False, reporter=None):
     path = Path(path)
     if path.is_symlink() or not path.is_dir():
-        raise ValueError("バックアップのパッケージを選択してください。")
+        raise ValueError("Choose a backup package.")
     manifest = read_json(child(path, MANIFEST))
     if manifest.get("format") != "airlift.app-backup" or manifest.get("version") != 1:
-        raise ValueError("このバックアップ形式には対応していません。")
+        raise ValueError("This backup format isn't supported.")
     identifiers = set()
     folders = set()
     for item in manifest["regions"]:
         if item["id"] in identifiers or item["folder"] in folders:
-            raise ValueError("バックアップの領域が重複しています。")
+            raise ValueError("The backup contains duplicate areas.")
         identifiers.add(item["id"])
         folders.add(item["folder"])
         if item["folder"] != region_folder(item):
-            raise ValueError("バックアップの領域パスが不正です。")
+            raise ValueError("The backup contains an invalid folder path.")
         root = child(path, item["folder"])
         names = set()
         for entry in item["entries"]:
             key = relative(entry["path"])
             if not key or key in names:
-                raise ValueError("バックアップ内のパスが重複または不正です。")
+                raise ValueError("The backup contains duplicate or invalid paths.")
             names.add(key)
             child(root, key, allow_leaf_link=True)
         if verify and signature(inventory(root, reporter)) != signature(item["entries"]):
-            raise ValueError("バックアップの内容が記録と一致しません: " + item["name"])
+            raise ValueError("The backup doesn't match its record: " + item["name"])
     return manifest
 
 
@@ -131,7 +131,7 @@ def clone(source, reporter):
     path, result = create(manifest["app"], manifest["device"], "edited")
     try:
         for item in manifest["regions"]:
-            reporter.progress("編集用コピーを作成: " + item["name"], force=True)
+            reporter.progress("Creating an editable copy: " + item["name"], force=True)
             destination = child(path, item["folder"])
             destination.parent.mkdir(parents=True, exist_ok=True)
             copy_tree(child(source, item["folder"]), destination, reporter)
@@ -170,7 +170,7 @@ def import_backup(source, reporter):
     if source.suffix.lower() == ".xcappdata":
         data = child(source, "AppData")
         if not data.is_dir():
-            raise ValueError("xcappdata内にAppDataがありません。")
+            raise ValueError("The xcappdata has no AppData folder.")
         info = {}
         info_path = child(source, "AppDataInfo.plist")
         if info_path.exists():
@@ -182,7 +182,7 @@ def import_backup(source, reporter):
                "version": info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "",
                "category": "user", "identity": "imported", "regions": []}
         path, manifest = create(app, {}, "xcappdata")
-        item = {"id": "data:" + bundle, "kind": "data", "identifier": bundle, "name": "データ",
+        item = {"id": "data:" + bundle, "kind": "data", "identifier": bundle, "name": "Data",
                 "folder": "Payload/Data", "entries": []}
         try:
             destination = child(path, item["folder"])
@@ -203,13 +203,13 @@ def export_backup(source, destination, xcappdata, reporter):
     manifest = load(source, verify=True, reporter=reporter)
     destination = Path(destination)
     if destination.exists():
-        raise ValueError("保存先がすでに存在します。別の名前を指定してください。")
+        raise ValueError("Something already exists at this location. Choose a different name.")
     temporary = destination.with_name("." + destination.name + "." + str(uuid.uuid4()))
     try:
         if xcappdata:
             item = next((r for r in manifest["regions"] if r["kind"] == "data"), None)
             if not item:
-                raise ValueError("データコンテナを含まないバックアップです。")
+                raise ValueError("This backup doesn't include app data.")
             temporary.mkdir()
             copy_tree(child(source, item["folder"]), temporary / "AppData", reporter)
             with (temporary / "AppDataInfo.plist").open("wb") as stream:

@@ -22,13 +22,13 @@ struct AppOperationView: View {
             }
             if !operation.steps.isEmpty {
                 HStack {
-                    Text("全体の進捗（工程ベース）").font(.headline)
+                    Text("全体の進み具合").font(.headline)
                     Spacer()
                     Text(operation.overallFraction, format: .percent.precision(.fractionLength(0)))
                         .monospacedDigit()
                 }
                 ProgressView(value: operation.overallFraction).tint(.accentColor)
-                    .accessibilityLabel("全体の進捗")
+                    .accessibilityLabel("全体の進み具合")
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -38,14 +38,14 @@ struct AppOperationView: View {
                         Text(region).lineLimit(1).truncationMode(.middle)
                     }
                     if let index = operation.regionIndex, let count = operation.regionCount {
-                        Text("領域 \(index) / \(count)").monospacedDigit()
+                        Text("対象 \(index) / \(count)").monospacedDigit()
                     }
                 }
                 if operation.running {
                     if let fraction = operation.fraction { ProgressView(value: fraction) }
                     else { ProgressView().progressViewStyle(.linear) }
                 } else {
-                    Label(operation.failed ? "ログを確認してください" : "処理が完了しました",
+                    Label(operation.failed ? "問題が発生しました。ログを確認してください" : "完了しました",
                           systemImage: operation.failed ? "exclamationmark.triangle" : "checkmark.circle.fill")
                         .foregroundStyle(operation.failed ? Color.orange : Color.green)
                 }
@@ -57,9 +57,6 @@ struct AppOperationView: View {
                         if let completed = operation.completed, let total = operation.total {
                             Text("現在のファイル: \(AppOperation.bytes(completed)) / \(AppOperation.bytes(total))")
                         }
-                        if let index = operation.chunkIndex, let count = operation.chunkCount, let size = operation.chunkSize {
-                            Text("チャンク \(index) / \(count) · \(AppOperation.bytes(size))単位")
-                        }
                         Spacer()
                         if let rate = operation.bytesPerSecond {
                             Text("\(AppOperation.bytes(Int64(rate)))/秒")
@@ -69,10 +66,10 @@ struct AppOperationView: View {
             }
             Divider()
             HStack {
-                Text(operation.steps.isEmpty ? "処理ログ" : "工程一覧・処理ログ").font(.headline)
-                Text("最新1,000行").font(.caption).foregroundStyle(.secondary)
+                Text(operation.steps.isEmpty ? "ログ" : "手順とログ").font(.headline)
+                Text("最新1,000行を表示").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Toggle("末尾を追従", isOn: $followLog).toggleStyle(.checkbox)
+                Toggle("自動でスクロール", isOn: $followLog).toggleStyle(.checkbox)
                 Button("ログをFinderで表示", action: operation.revealLog).disabled(operation.logURL == nil)
             }
             HSplitView {
@@ -99,9 +96,11 @@ struct AppOperationView: View {
             }.frame(minHeight: 140)
             AppGlassActions {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(operation.cancelling ? "中止処理中です。コンテナの復帰と後片付けを待っています。" : "128 MiBを超えるファイルも、分割ファイルを作らずストリーミング転送します。")
+                    if operation.cancelling {
+                        Text("中止しています。データを元の場所に戻すまでお待ちください。")
+                    }
                     if operation.running {
-                        Text("処理が終わるまで、端末で対象アプリを開かずにお待ちください。")
+                        Text("終わるまで、デバイスでこのアプリを開かないでください。")
                     }
                 }.font(.caption).foregroundStyle(.secondary)
                 Spacer()

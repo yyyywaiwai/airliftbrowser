@@ -11,16 +11,16 @@ struct AppBackupView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("アプリをバックアップ").font(.title2.weight(.semibold))
             Text(manager.title).foregroundStyle(.secondary)
-            Text("保存する対象").font(.headline)
+            Text("保存するもの").font(.headline)
             VStack(alignment: .leading, spacing: 16) {
-                target("データ", kind: "data", description: "Documents・Library・キャッシュ・tmp")
-                target("App Group", kind: "group", description: "関連する共有コンテナをすべて保存")
-                target("アプリ本体", kind: "bundle", description: "閲覧・エクスポート用（端末への復元対象外）")
+                target("データ", kind: "data", description: "書類・設定・キャッシュなど")
+                target("共有データ", kind: "group", description: "ほかのアプリや拡張機能と共有しているデータ")
+                target("アプリ本体", kind: "bundle", description: "中身の確認用（デバイスには復元できません）")
             }
             VStack(alignment: .leading, spacing: 6) {
-                Toggle("バックアップ／リストアの内容検証", isOn: $manager.verificationEnabled)
+                Toggle("転送後に内容を確認する", isOn: $manager.verificationEnabled)
                     .toggleStyle(.checkbox)
-                Text("共通設定として保存します。オフの場合、バックアップ時の保存内容の再読み込み照合を省略します。")
+                Text("バックアップと復元の両方に適用されます。オフにすると速くなりますが、正しく転送できたかの確認を省きます。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
@@ -40,13 +40,13 @@ struct AppBackupView: View {
         .onAppear { selectedKinds = availableKinds }
     }
 
-    private func target(_ name: String, kind: String, description: String) -> some View {
+    private func target(_ name: LocalizedStringKey, kind: String, description: LocalizedStringKey) -> some View {
         Toggle(isOn: Binding(get: { selectedKinds.contains(kind) }, set: { enabled in
             if enabled { selectedKinds.insert(kind) } else { selectedKinds.remove(kind) }
         })) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
-                Text(availableKinds.contains(kind) ? description : "取得可能な領域がありません")
+                Text(availableKinds.contains(kind) ? description : "このアプリにはありません")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

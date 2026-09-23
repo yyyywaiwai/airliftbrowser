@@ -9,7 +9,7 @@ struct ManagedAppRow: View {
             ManagedAppIcon(app: app, deviceID: deviceID)
             VStack(alignment: .leading, spacing: 4) {
                 Text(app.name).lineLimit(2)
-                Text(app.bundleID.isEmpty ? "所属未識別" : app.bundleID)
+                Text(app.bundleID.isEmpty ? String(localized: "不明なアプリ") : app.bundleID)
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 Text(app.detailLabel).font(.caption2).foregroundStyle(.tertiary)
             }

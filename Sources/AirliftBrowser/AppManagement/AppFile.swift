@@ -11,5 +11,7 @@ struct AppFile: Codable, Identifiable, Hashable, Sendable {
     var isDirectory: Bool { kind == "directory" }
     var symbol: String { isDirectory ? "folder.fill" : kind == "link" ? "link" : "doc" }
     var sizeLabel: String { isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
-    var kindLabel: String { isDirectory ? "フォルダ" : kind == "link" ? "リンク" : "ファイル" }
+    var kindLabel: String {
+        isDirectory ? String(localized: "フォルダ") : kind == "link" ? String(localized: "リンク") : String(localized: "ファイル")
+    }
 }

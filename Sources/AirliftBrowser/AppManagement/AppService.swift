@@ -10,7 +10,7 @@ enum AppService {
         let input = try JSONEncoder().encode(request)
         let helper = Bundle.main.resourceURL?.appendingPathComponent("AppManagement/manager.py")
         return try await Task.detached(priority: .userInitiated) {
-            guard let helper else { throw AppServiceError("アプリ管理ヘルパーが見つかりません。") }
+            guard let helper else { throw AppServiceError(String(localized: "アプリの一部ファイルが見つかりません。再インストールしてください。")) }
             let work = FileManager.default.temporaryDirectory.appendingPathComponent("airlift-command-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: work) }
@@ -49,10 +49,11 @@ enum AppService {
             process.waitUntilExit()
             guard let result else {
                 let detail = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
-                throw AppServiceError("アプリ管理処理が中断されました（\(process.terminationStatus)）。\n\(detail.suffix(2000))")
+                let failed = String(localized: "処理が途中で止まりました（コード \(process.terminationStatus)）。")
+                throw AppServiceError("\(failed)\n\(detail.suffix(2000))")
             }
             guard result.ok == true, process.terminationStatus == 0 else {
-                throw AppServiceError(result.error ?? "アプリ管理処理に失敗しました。")
+                throw AppServiceError(result.error ?? String(localized: "処理に失敗しました。"))
             }
             return result
         }.value

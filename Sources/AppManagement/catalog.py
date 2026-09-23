@@ -32,11 +32,11 @@ async def installed(device):
         name = info.get("CFBundleDisplayName") or info.get("CFBundleName") or identifier
         regions = []
         if info.get("Container"):
-            regions.append(region("data", identifier, info["Container"], "データ"))
+            regions.append(region("data", identifier, info["Container"], "Data"))
         for group, path in sorted((info.get("GroupContainers") or {}).items()):
             regions.append(region("group", group, path))
         if info.get("Path"):
-            regions.append(region("bundle", identifier, info["Path"], "アプリ本体"))
+            regions.append(region("bundle", identifier, info["Path"], "App"))
         rows.append({"id": identifier, "bundleID": identifier, "name": name,
                      "version": info.get("CFBundleShortVersionString") or info.get("CFBundleVersion", ""),
                      "category": "system" if info.get("ApplicationType") == "System" else "user",
@@ -61,7 +61,7 @@ async def catalog(device, include_orphans=True):
                         try:
                             leaves = await asyncio.wait_for(info.ls(root), 30)
                         except Exception as error:
-                            warnings.append("未識別コンテナの列挙: " + root + " · " + (str(error) or type(error).__name__))
+                            warnings.append("Couldn't list unidentified containers: " + root + " · " + (str(error) or type(error).__name__))
                             continue
                         for leaf in leaves:
                             if "/" in leaf or leaf in (".", ".."):
@@ -70,12 +70,12 @@ async def catalog(device, include_orphans=True):
                             if path in known:
                                 continue
                             key = "orphan:" + hashlib.sha256(path.encode()).hexdigest()[:20]
-                            title = {"data": "残存データ", "group": "残存App Group", "bundle": "残存アプリ本体"}[kind]
+                            title = {"data": "Leftover data", "group": "Leftover App Group", "bundle": "Leftover app"}[kind]
                             rows.append({"id": key, "bundleID": "", "name": title + " · " + leaf,
                                          "version": "", "category": "orphan", "identity": "unknown",
                                          "regions": [region(kind, leaf, path, title)]})
         except Exception as error:
-            warnings.append("未識別コンテナの列挙: " + (str(error) or type(error).__name__))
+            warnings.append("Couldn't list unidentified containers: " + (str(error) or type(error).__name__))
         # Preserve inferred identities, without treating a guess as an installed
         # app or merging two different residual UUIDs into one row.
         try:
@@ -89,10 +89,10 @@ async def catalog(device, include_orphans=True):
                     identifier = by_path.get(app["regions"][0]["path"])
                     if identifier:
                         app["bundleID"] = identifier
-                        app["name"] = names.get(identifier, identifier) + "（残存・推定）"
+                        app["name"] = names.get(identifier, identifier) + " (leftover, estimated)"
                         app["identity"] = "inferred"
         except Exception as error:
-            warnings.append("残存コンテナの名前補完: " + (str(error) or type(error).__name__))
+            warnings.append("Couldn't look up names for leftover containers: " + (str(error) or type(error).__name__))
     order = {"user": 0, "system": 1, "orphan": 2}
     return {"apps": sorted(rows, key=lambda row: (order[row["category"]], row["name"].casefold())),
             "device": device_info, "warnings": warnings}
@@ -102,10 +102,10 @@ async def resolve(device, app_id, region_id=None):
     result = await catalog(device, include_orphans=app_id.startswith("orphan:"))
     app = next((row for row in result["apps"] if row["id"] == app_id), None)
     if not app:
-        raise ValueError("アプリが見つかりません。アプリ一覧を更新してください。")
+        raise ValueError("Couldn't find the app. Please refresh the app list.")
     if region_id is None:
         return app, result["device"]
     selected = next((row for row in app["regions"] if row["id"] == region_id), None)
     if not selected:
-        raise ValueError("コンテナが見つかりません。アプリ一覧を更新してください。")
+        raise ValueError("Couldn't find the container. Please refresh the app list.")
     return app, selected

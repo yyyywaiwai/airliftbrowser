@@ -14,30 +14,30 @@ struct AppRestoreView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("バックアップをリストア").font(.title2.weight(.semibold))
+            Text("バックアップから復元").font(.title2.weight(.semibold))
             Text("\(backup.name) · \(backup.dateLabel)").foregroundStyle(.secondary)
             if !backup.issues.isEmpty {
                 Text(backup.issues.joined(separator: "\n")).font(.caption).foregroundStyle(.orange).lineLimit(4)
             }
             Form {
-                Picker("復元先アプリ", selection: $targetID) {
-                    Text("選択してください").tag("")
+                Picker("復元先のアプリ", selection: $targetID) {
+                    Text("選んでください").tag("")
                     ForEach(manager.apps.filter { $0.regions.contains { $0.kind != "bundle" } }) { app in
                         Text("\(app.name) · \(app.bundleID.isEmpty ? app.id : app.bundleID)").tag(app.id)
                     }
                 }
                 Picker("復元方法", selection: $mode) {
-                    Text("完全置換").tag("replace")
-                    Text("上書き・追加").tag("merge")
+                    Text("置き換える").tag("replace")
+                    Text("追加・上書きする").tag("merge")
                 }.pickerStyle(.segmented)
-                Text(mode == "replace" ? "選択した領域を保存時点に揃えます。バックアップにない現在の項目は削除します。" : "同名項目を上書きし、それ以外の現在の項目は残します。")
+                Text(mode == "replace" ? "バックアップした時点の状態に戻します。バックアップにない今のファイルは削除されます。" : "同じ名前のファイルは上書きし、それ以外の今のファイルは残します。")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("バックアップ／リストアの内容検証", isOn: $manager.verificationEnabled)
-                Text("共通設定として保存します。オフの場合、バックアップ時の保存内容の再照合、リストア前の内容照合と復元後の読み戻し照合を省略します。")
+                Toggle("転送後に内容を確認する", isOn: $manager.verificationEnabled)
+                Text("バックアップと復元の両方に適用されます。オフにすると速くなりますが、正しく転送できたかの確認を省きます。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
-            Text("復元する領域と対応先").font(.headline)
+            Text("復元するデータと復元先").font(.headline)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(sources) { source in
@@ -51,11 +51,11 @@ struct AppRestoreView: View {
                 }
             }.frame(maxHeight: 220)
             AppGlassActions {
-                Button("復元先を更新", action: manager.loadRestoreApps)
+                Button("アプリ一覧を更新", action: manager.loadRestoreApps)
                 if manager.busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("キャンセル", role: .cancel) { dismiss() }
-                Button("リストア") {
+                Button("復元") {
                     if let target { manager.restore(backup, target: target, mode: mode, mappings: chosenMappings) }
                 }.modifier(AppPrimaryButtonStyle())
                     .disabled(target == nil || chosenMappings.isEmpty || Set(chosenMappings.values).count != chosenMappings.count)

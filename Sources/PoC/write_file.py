@@ -66,31 +66,31 @@ def collect_tree(root):
             rel_dir = ""
         depth = 0 if not rel_dir else rel_dir.count("/") + 1
         if depth > 40:
-            raise ValueError("フォルダの階層が深すぎます。")
+            raise ValueError("The folder is nested too deeply.")
         if rel_dir:
             if any(not safe_component(part) for part in rel_dir.split("/")):
-                raise ValueError("フォルダ名が不正です。")
+                raise ValueError("Invalid folder name.")
             dirs.add(rel_dir)
         for name in dirnames:
             path = Path(dirpath) / name
             if path.is_symlink():
-                raise ValueError(f"シンボリックリンクは書けません: {name}")
+                raise ValueError(f"Symbolic links can't be copied: {name}")
             if not safe_component(name):
-                raise ValueError("フォルダ名が不正です。")
+                raise ValueError("Invalid folder name.")
         for name in filenames:
             path = Path(dirpath) / name
             if name == ".DS_Store":
                 continue
             if path.is_symlink():
-                raise ValueError(f"シンボリックリンクは書けません: {name}")
+                raise ValueError(f"Symbolic links can't be copied: {name}")
             if not path.is_file():
-                raise ValueError(f"通常ファイル以外は書けません: {name}")
+                raise ValueError(f"Only regular files can be copied: {name}")
             if not safe_component(name):
-                raise ValueError("ファイル名が不正です。")
+                raise ValueError("Invalid file name.")
             data = path.read_bytes()
             total += len(data)
             if total > LIMIT:
-                raise ValueError("フォルダは合計128 MiB以下にしてください。")
+                raise ValueError("The folder must be 128 MiB or smaller in total.")
             files[name if not rel_dir else f"{rel_dir}/{name}"] = data
     return files, dirs
 
@@ -122,7 +122,7 @@ def build_tree_archive(target, files, dirs):
 def list_media(udid, path):
     reply = airlift.run_json([os.fspath(BRIDGE), "list", udid, path], timeout=75)
     if reply.get("exitCode") or not reply.get("ok"):
-        raise airlift.AirLiftError(reply.get("error") or "回収したフォルダを読めませんでした。")
+        raise airlift.AirLiftError(reply.get("error") or "Couldn't read the recovered folder.")
     return reply.get("entries") or []
 
 
@@ -132,7 +132,7 @@ def read_media_file(udid, remote, scratch):
     reply = airlift.run_json(
         [os.fspath(BRIDGE), "get", udid, remote, os.fspath(destination)], timeout=120)
     if reply.get("exitCode") or not reply.get("ok"):
-        raise airlift.AirLiftError(reply.get("error") or "回収したファイルを読めませんでした。")
+        raise airlift.AirLiftError(reply.get("error") or "Couldn't read the recovered file.")
     data = destination.read_bytes()
     destination.unlink()
     return data
@@ -140,12 +140,12 @@ def read_media_file(udid, remote, scratch):
 
 def pull_tree(udid, media_path, scratch, depth=0):
     if depth > 40:
-        raise airlift.AirLiftError("回収したフォルダの階層が深すぎます。")
+        raise airlift.AirLiftError("The recovered folder is nested too deeply.")
     files, dirs = {}, {""}
     for entry in list_media(udid, media_path):
         name, kind, child = entry.get("name"), entry.get("kind"), entry.get("id")
         if not isinstance(name, str) or not isinstance(child, str) or not safe_component(name):
-            raise airlift.AirLiftError("回収したフォルダに不正な項目があります。")
+            raise airlift.AirLiftError("The recovered folder contains an invalid item.")
         if kind == "S_IFDIR":
             sub_files, sub_dirs = pull_tree(udid, child, scratch, depth + 1)
             dirs.add(name)
@@ -157,7 +157,7 @@ def pull_tree(udid, media_path, scratch, depth=0):
         elif kind == "S_IFREG":
             files[name] = read_media_file(udid, child, scratch)
         else:
-            raise airlift.AirLiftError(f"通常ファイルとフォルダ以外は照合できません: {name}")
+            raise airlift.AirLiftError(f"Only files and folders can be verified: {name}")
     return files, dirs
 
 
@@ -190,17 +190,17 @@ def ensure_name_is_absent(device_id, target, name):
         if completed.returncode or not reply.get("ok"):
             continue
         if any(entry.get("name") == name for entry in reply.get("entries", [])):
-            raise ValueError("同名の項目があります。上書きせず、入力元の名前を変更してください。")
+            raise ValueError("An item with the same name already exists. Rename your item instead of replacing it.")
         return
-    raise ValueError("同名項目の有無を取得できないため、元のファイル名では書込めません。")
+    raise ValueError("Couldn't check for an existing item with the same name, so it can't be copied with its original name.")
 
 
 def write_file(device_id, target, local_path, name):
     if not safe_component(name):
-        raise ValueError("名前が不正です。")
+        raise ValueError("Invalid name.")
     local = Path(local_path)
     if local.is_symlink():
-        raise ValueError("シンボリックリンクは書けません。")
+        raise ValueError("Symbolic links can't be copied.")
     tree = None
     if local.is_dir():
         files, dirs = collect_tree(local)
@@ -211,7 +211,7 @@ def write_file(device_id, target, local_path, name):
     else:
         payload = local.read_bytes()
         if len(payload) > LIMIT:
-            raise ValueError("ファイルは128 MiB以下にしてください。")
+            raise ValueError("The file must be 128 MiB or smaller.")
         archive_bytes = airlift.build_archive(target, payload)
         payload_size = len(payload)
     device = airlift.resolve_device(device_id)

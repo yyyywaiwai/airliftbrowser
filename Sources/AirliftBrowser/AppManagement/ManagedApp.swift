@@ -13,9 +13,9 @@ struct ManagedApp: Codable, Identifiable, Hashable, Sendable {
 
     var categoryName: String {
         switch category {
-        case "system": "標準アプリ"
-        case "orphan": "残存コンテナ"
-        default: "インストール済み"
+        case "system": String(localized: "Apple製")
+        case "orphan": String(localized: "削除済みアプリの残りデータ")
+        default: String(localized: "インストール済み")
         }
     }
 }

@@ -47,12 +47,12 @@ def download_destination(destination):
     """Publish only a complete download; leave an existing destination intact."""
     destination = Path(destination)
     if destination.exists() or destination.is_symlink():
-        raise ValueError("保存先がすでに存在します。別の名前を指定してください。")
+        raise ValueError("Something already exists at this location. Choose a different name.")
     temporary = destination.with_name(".airlift-download-" + str(uuid.uuid4()))
     try:
         yield temporary
         if destination.exists() or destination.is_symlink():
-            raise ValueError("保存中に同名の項目が作られました。別の名前を指定してください。")
+            raise ValueError("An item with the same name appeared while saving. Choose a different name.")
         os.rename(temporary, destination)
     finally:
         if temporary.is_symlink() or temporary.is_file():
@@ -63,9 +63,9 @@ def download_destination(destination):
 
 def relative(value):
     if not isinstance(value, str) or "\0" in value or value.startswith("/"):
-        raise ValueError("相対パスが不正です。")
+        raise ValueError("Invalid path.")
     if value and any(part in ("", ".", "..") for part in value.split("/")):
-        raise ValueError("相対パスが不正です。")
+        raise ValueError("Invalid path.")
     return value
 
 
@@ -75,11 +75,11 @@ def child(root, value, allow_leaf_link=False):
     cursor = root
     parts = relative(value).split("/") if value else []
     if root.is_symlink():
-        raise ValueError("コンテナのルートにリンクは指定できません。")
+        raise ValueError("The container's top folder can't be a link.")
     for index, part in enumerate(parts):
         cursor = cursor / part
         if cursor.is_symlink() and not (allow_leaf_link and index == len(parts) - 1):
-            raise ValueError("リンク先を経由する操作には対応していません。")
+            raise ValueError("Actions through links aren't supported.")
     return cursor
 
 
@@ -93,7 +93,7 @@ def sha256(path, reporter=None):
             completed += len(data)
             if reporter:
                 reporter.advance(len(data))
-                reporter.progress("Mac上の内容照合: " + Path(path).name, completed, size, phase="verify-local")
+                reporter.progress("Verifying on Mac: " + Path(path).name, completed, size, phase="verify-local")
     return digest.hexdigest()
 
 
@@ -125,12 +125,12 @@ class Reporter:
             title = self.active_step["title"]
             self.active_step["state"] = state
             self.active_step = None
-            self.progress(title + ("：完了" if state == "complete" else "：中断"), force=True, cancellable=False)
+            self.progress(title + (": done" if state == "complete" else ": stopped"), force=True, cancellable=False)
 
     def skip(self, key):
         step = next(step for step in self.steps if step["id"] == key)
         step["state"] = "skipped"
-        self.progress("スキップ: " + step["title"], force=True)
+        self.progress("Skipped: " + step["title"], force=True)
 
     def fail_remaining(self, prefix):
         for step in self.steps:
@@ -143,7 +143,7 @@ class Reporter:
 
     def check(self):
         if self.cancel_path and self.cancel_path.exists():
-            raise Cancelled("処理を中止しました。端末の一時移動は復元して終了します。")
+            raise Cancelled("Cancelled. Anything temporarily moved on the device will be put back before finishing.")
 
     def progress(self, message, completed=None, total=None, force=False, *, phase=None, chunk_size=None, cancellable=True):
         if cancellable:
