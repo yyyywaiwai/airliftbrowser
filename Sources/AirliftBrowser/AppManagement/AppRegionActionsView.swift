@@ -7,28 +7,43 @@ struct AppRegionActionsView: View {
 
     var body: some View {
         let regions = manager.regions.filter { $0.kind == kind }
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.subheadline.weight(.medium))
+        Section(title) {
             if regions.isEmpty {
-                Text("取得可能な領域がありません")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("取得可能な領域がありません").foregroundStyle(.secondary)
             } else {
                 ForEach(regions) { region in
-                    Button {
+                    AppActionRow(title: region.name, systemImage: region.symbol) {
                         manager.selectRegion(region.id)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Label(region.name, systemImage: region.symbol)
-                                .multilineTextAlignment(.leading)
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .accessibilityIdentifier("app-browse-\(region.id)")
                 }
             }
         }
+    }
+}
+
+struct AppActionRow: View {
+    let title: String
+    var subtitle: String?
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.tint).frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
