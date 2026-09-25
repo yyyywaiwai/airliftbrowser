@@ -3416,6 +3416,22 @@
         }
       }
     },
+    "一部を保存できなかったバックアップなので、置き換えはできません。同じ名前のファイルは上書きし、それ以外の今のファイルは残します。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some files couldn't be saved in this backup, so it can't replace the app's data. Files with the same name are replaced; all other current files are kept."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此备份有部分文件未能存储，因此无法替换。覆盖同名文件，保留其他现有文件。"
+          }
+        }
+      }
+    },
     "同じ名前の項目「%@」が複数あります。": {
       "localizations": {
         "en": {

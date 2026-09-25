@@ -44,10 +44,12 @@ struct AppRestoreView: View {
                     .frame(maxWidth: .infinity)
                 }
                 Picker("復元方法", selection: $mode) {
-                    Text("置き換える").tag("replace")
+                    Text("置き換える").tag("replace").disabled(backup.status == "partial")
                     Text("追加・上書きする").tag("merge")
                 }.pickerStyle(.segmented)
-                Text(mode == "replace" ? "バックアップした時点の状態に戻します。バックアップにない今のファイルは削除されます。" : "同じ名前のファイルは上書きし、それ以外の今のファイルは残します。")
+                Text(mode == "replace" ? "バックアップした時点の状態に戻します。バックアップにない今のファイルは削除されます。"
+                     : backup.status == "partial" ? "一部を保存できなかったバックアップなので、置き換えはできません。同じ名前のファイルは上書きし、それ以外の今のファイルは残します。"
+                     : "同じ名前のファイルは上書きし、それ以外の今のファイルは残します。")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("転送後に内容を確認する", isOn: $manager.verificationEnabled)
                 Text("バックアップと復元の両方に適用されます。オフにすると速くなりますが、正しく転送できたかの確認を省きます。")
@@ -91,6 +93,7 @@ struct AppRestoreView: View {
         .onChange(of: targetID) { matchRegions() }
         .onChange(of: manager.apps) { chooseDefault() }
         .onAppear {
+            if backup.status == "partial" { mode = "merge" }
             chooseDefault()
             if manager.apps.isEmpty { manager.loadRestoreApps() }
         }
