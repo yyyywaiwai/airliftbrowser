@@ -4,13 +4,19 @@ import UniformTypeIdentifiers
 
 @main
 struct AirliftBrowserApp: App {
+    @State private var browser = Browser()
+
     var body: some Scene {
         Window("Airlift Browser", id: "browser") {
-            BrowserView()
+            BrowserView(browser: browser)
                 .background(ToolbarLabels())
         }
         .defaultSize(width: 1040, height: 680)
         .commands { CommandGroup(replacing: .newItem) {} }
+
+        Settings {
+            SettingsView(browser: browser)
+        }
     }
 }
 
@@ -23,7 +29,7 @@ private struct LocationRowButtonStyle: ButtonStyle {
 }
 
 private struct BrowserView: View {
-    @State private var browser = Browser()
+    @Bindable var browser: Browser
     @State private var appManager = AppManager()
     @State private var appSection = "apps"
     @State private var search = ""
@@ -34,6 +40,10 @@ private struct BrowserView: View {
     @State private var dropTargeted = false
     @State private var showPoC = false
     @State private var restoringCard: PayCard?
+
+    init(browser: Browser) {
+        self.browser = browser
+    }
 
     private var visibleEntries: [Entry] {
         browser.entries.filter { search.isEmpty || $0.name.localizedStandardContains(search) }
@@ -67,8 +77,6 @@ private struct BrowserView: View {
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
-                Label("AIRLIFT", systemImage: "externaldrive.connected.to.line.below")
-                    .font(.headline).tracking(2).padding(20)
                 List(selection: Binding(get: { browser.deviceID }, set: { browser.connect($0) })) {
                     Section("デバイス") {
                         ForEach(browser.devices) { device in
@@ -97,24 +105,21 @@ private struct BrowserView: View {
                         browser.showCards()
                     }
                 }.padding(.horizontal, 12).padding(.bottom, 8)
-                VStack(alignment: .leading, spacing: 8) {
-                    Button("デバイスを再検索", systemImage: "arrow.triangle.2.circlepath") { browser.scan() }
-                        .padding(.top, 6)
-                    Button("書き込みテスト…", systemImage: "lock.open.trianglebadge.exclamationmark") {
-                        showPoC = true
+                VStack(alignment: .leading, spacing: 6) {
+                    Button(action: { browser.scan() }) {
+                        sidebarRowLabel("デバイスを再検索", icon: "arrow.triangle.2.circlepath")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(browser.deviceID == nil)
-                }.padding(16)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("クレジット")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                    Link("airlift", destination: URL(string: "https://github.com/0xjohnnydev/airlift")!)
-                    Link("Airlift Cards", destination: URL(string: "https://github.com/licht-jb/AirliftCards")!)
+                    .buttonStyle(LocationRowButtonStyle())
+                    .padding(.horizontal, 8)
+
+                    SettingsLink {
+                        sidebarRowLabel("設定", icon: "gearshape")
+                    }
+                    .buttonStyle(LocationRowButtonStyle())
+                    .padding(.horizontal, 8)
                 }
-                .font(.caption)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
+                .padding(.top, 16)
                 .padding(.bottom, 12)
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
@@ -446,13 +451,17 @@ private struct BrowserView: View {
         naming = NameRequest(entry: entry)
     }
 
+    private func sidebarRowLabel(_ title: LocalizedStringKey, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 7)
+    }
+
     private func locationButton(_ title: LocalizedStringKey, icon: String, hint: LocalizedStringKey, selected: Bool,
                                 action: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button(action: action) {
-                Label(title, systemImage: icon)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 7)
+                sidebarRowLabel(title, icon: icon)
             }
             .buttonStyle(LocationRowButtonStyle())
             .disabled(browser.deviceID == nil || browser.blocksNewWork)
@@ -482,6 +491,65 @@ private struct ActivityBar: View {
         .progressViewStyle(.linear)
         .controlSize(.small)
         .frame(width: 92)
+    }
+}
+
+private struct SettingsView: View {
+    let browser: Browser
+    @State private var showPoC = false
+    @State private var language = (UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")?["AppleLanguages"] as? [String])?.first ?? ""
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("言語", selection: $language) {
+                    Text("システムのデフォルト").tag("")
+                    Divider()
+                    Text(verbatim: "日本語").tag("ja")
+                    Text(verbatim: "English").tag("en")
+                    Text(verbatim: "简体中文").tag("zh-Hans")
+                }
+                .onChange(of: language) {
+                    UserDefaults.standard.set(language.isEmpty ? nil : [language], forKey: "AppleLanguages")
+                }
+            } footer: {
+                Text("変更はアプリの再起動後に反映されます。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent {
+                    Button("テストを実行") { showPoC = true }
+                        .disabled(browser.deviceID == nil || browser.blocksNewWork)
+                } label: {
+                    Text("書き込みテスト")
+                    Text("指定したフォルダにテスト用のファイルを作り、正しく読み戻せるか確認してから削除します。すでにあるファイルには触れません。")
+                }
+            }
+
+            Section("クレジット") {
+                LabeledContent("airlift") {
+                    Link(destination: URL(string: "https://github.com/0xjohnnydev/airlift")!) {
+                        Text(verbatim: "GitHub")
+                    }
+                }
+                LabeledContent("Airlift Cards") {
+                    Link(destination: URL(string: "https://github.com/licht-jb/AirliftCards")!) {
+                        Text(verbatim: "GitHub")
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .frame(width: 500, height: 400)
+        .sheet(isPresented: $showPoC) {
+            PoCView(
+                browser: browser,
+                initialTarget: browser.scope == .system ? browser.path : "/var/mobile/Documents"
+            )
+        }
     }
 }
 
