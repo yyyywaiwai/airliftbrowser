@@ -799,38 +799,55 @@ class Acceptance(unittest.TestCase):
                     if step["total"] is not None:
                         self.assertEqual(step["completed"], step["total"])
 
-                # A protected WebKit blob used to abort the entire data region,
-                # dropping later Preferences/Documents from the manifest.
+                # Known protected trees are pruned without even stat/list/open,
+                # while similarly named directories remain part of the backup.
                 blocked = live / "Library/Caches/WebKit/NetworkCache/Version 17/Blobs/protected"
                 blocked.parent.mkdir(parents=True)
                 blocked.write_bytes(b"protected cache")
-                original_open = afc.fopen
+                website = live / "Library/WebKit/WebsiteDataStore/57260f9c-6d07-450b-9cee-ad9cb8573296/NetworkCache/Version 17/Blobs/protected"
+                website.parent.mkdir(parents=True)
+                website.write_bytes(b"protected data store")
+                safari = live / "SystemData/com.apple.SafariViewService/Library/WebKit/WebsiteData/protected"
+                safari.parent.mkdir(parents=True)
+                safari.write_bytes(b"protected website data")
+                similar = live / "Library/Caches/WebKitOther/keep"
+                similar.parent.mkdir(parents=True)
+                similar.write_bytes(b"keep")
+                original_pull = transport.pull
 
-                async def refuse_blob(remote, mode):
-                    if remote.endswith("/protected"):
-                        raise AFCOpenError(1)
-                    return await original_open(remote, mode)
+                async def guarded_pull(afc, remote, *args, **kwargs):
+                    if kwargs.get("_relative") in transport.BACKUP_EXCLUDED_TREES:
+                        with patch.object(afc, "stat", side_effect=AssertionError("excluded tree accessed")), \
+                                patch.object(afc, "listdir", side_effect=AssertionError("excluded tree listed")), \
+                                patch.object(afc, "fopen", side_effect=AssertionError("excluded file opened")):
+                            return await original_pull(afc, remote, *args, **kwargs)
+                    return await original_pull(afc, remote, *args, **kwargs)
 
                 for verify in (False, True):
-                    with patch.object(afc, "fopen", refuse_blob):
-                        partial = await manager.backup({"device": "test", "appID": app["id"], "verify": verify}, QuietReporter())
-                    saved = storage.load(partial["backup"]["path"], verify=True)
-                    self.assertEqual(saved["status"], "partial")
+                    reporter = QuietReporter()
+                    with patch.object(transport, "pull", guarded_pull):
+                        result = await manager.backup({"device": "test", "appID": app["id"], "verify": verify}, reporter)
+                    saved = storage.load(result["backup"]["path"], verify=True)
+                    self.assertEqual(saved["status"], "complete")
+                    self.assertEqual(saved["issues"], [])
+                    self.assertFalse(any(step["state"] == "failed" for step in reporter.steps))
                     self.assertEqual(len(saved["regions"]), 1)
                     region = saved["regions"][0]
-                    self.assertEqual(region["issues"][0]["path"], str(blocked.relative_to(live)))
-                    self.assertIn(str(blocked.relative_to(live)), saved["issues"][0])
-                    self.assertEqual([e["path"] for e in region["entries"] if e["kind"] == "file"], ["document"])
-                    self.assertEqual(saved["totalBytes"], len(b"backup payload"))
-                    destination = Path(partial["backup"]["path"]) / region["folder"]
+                    self.assertEqual(region["issues"], [])
+                    self.assertEqual([e["path"] for e in region["entries"] if e["kind"] == "file"],
+                                     ["Library/Caches/WebKitOther/keep", "document"])
+                    self.assertEqual(saved["totalBytes"], len(b"backup payload") + len(b"keep"))
+                    destination = Path(result["backup"]["path"]) / region["folder"]
                     self.assertFalse((destination / blocked.relative_to(live)).exists())
+                    self.assertFalse((destination / "Library/WebKit").exists())
+                    self.assertFalse((destination / safari.relative_to(live)).exists())
                     self.assertEqual((destination / "document").read_bytes(), b"backup payload")
-                    partial_request = {**request, "backupPath": partial["backup"]["path"]}
-                    with self.assertRaisesRegex(ValueError, "Add & Replace"):
-                        await manager.restore(partial_request, QuietReporter())
+                    restore_request = {**request, "backupPath": result["backup"]["path"]}
                     with patch.object(afc, "get_device_info", AsyncMock(return_value={"FSFreeBytes": 1024**3}), create=True):
-                        await manager.restore({**partial_request, "mode": "merge"}, QuietReporter())
+                        await manager.restore({**restore_request, "mode": "merge"}, QuietReporter())
                     self.assertEqual(blocked.read_bytes(), b"protected cache")
+                    self.assertEqual(website.read_bytes(), b"protected data store")
+                    self.assertEqual(safari.read_bytes(), b"protected website data")
         asyncio.run(run())
 
 

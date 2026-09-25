@@ -32,6 +32,14 @@ airlift.DEVICE_HELPER = HELPERS / "poc_device_helper"
 airlift.AIRTRAFFIC_HOST = HELPERS / "airtraffic_host"
 BRIDGE = HELPERS / "browser_bridge"
 
+# Container-relative trees that AFC cannot copy. Prune them before stat/list/open
+# during backups rather than trying each protected cache file individually.
+BACKUP_EXCLUDED_TREES = (
+    "Library/Caches/WebKit",
+    "Library/WebKit",
+    "SystemData/com.apple.SafariViewService/Library/WebKit",
+)
+
 
 async def run_json(command, timeout=120):
     return await asyncio.to_thread(airlift.run_json, list(map(str, command)), timeout)
@@ -207,6 +215,11 @@ async def pull(afc, remote, local, reporter, verified_hashes=None, verify=True, 
     # Only backups opt into retaining readable files after an AFC open refusal.
     # Downloads and the pull-before-rename path must remain all-or-nothing.
     reporter.check()
+    if issues is not None and any(_relative == path or _relative.startswith(path + "/")
+                                  for path in BACKUP_EXCLUDED_TREES):
+        # An intentional exclusion is informational, not a failed copy.
+        reporter.progress(f"Excluded from backup: {_relative} (protected WebKit data)", force=True)
+        return
     local = Path(local)
     info = await afc.stat(remote)
     kind = info["st_ifmt"]
