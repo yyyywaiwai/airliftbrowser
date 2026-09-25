@@ -252,6 +252,22 @@
         }
       }
     },
+    "Finderで表示": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在访达中显示"
+          }
+        }
+      }
+    },
     "Finderに表示": {
       "localizations": {
         "en": {
@@ -616,6 +632,22 @@
         }
       }
     },
+    "「%@」を置き換え": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace “%@”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换“%@”"
+          }
+        }
+      }
+    },
     "「%@」を開けません。": {
       "localizations": {
         "en": {
@@ -884,6 +916,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "全部"
+          }
+        }
+      }
+    },
+    "すべて削除…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete All…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部删除…"
           }
         }
       }
@@ -1492,6 +1540,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "大小（字节）"
+          }
+        }
+      }
+    },
+    "システムのデフォルト": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Default"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统默认"
           }
         }
       }
@@ -2168,6 +2232,22 @@
         }
       }
     },
+    "ファイルを削除": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleting files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在删除文件"
+          }
+        }
+      }
+    },
     "ファイルを変更": {
       "localizations": {
         "en": {
@@ -2196,6 +2276,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在检查文件"
+          }
+        }
+      }
+    },
+    "ファイルを置き換え": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replacing file"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在替换文件"
           }
         }
       }
@@ -2452,6 +2548,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示日志"
+          }
+        }
+      }
+    },
+    "ログファイル": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log Files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志文件"
+          }
+        }
+      }
+    },
+    "ログファイルをすべて削除しますか？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete all log files?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要删除所有日志文件吗？"
           }
         }
       }
@@ -2868,6 +2996,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "存储位置：%@"
+          }
+        }
+      }
+    },
+    "保存先に同じ名前の項目があります。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An item with the same name already exists at the destination."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目标位置已有同名项目。"
+          }
+        }
+      }
+    },
+    "保存先を選択": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Destination"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择目标位置"
+          }
+        }
+      }
+    },
+    "保存場所": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage Locations"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储位置"
           }
         }
       }
@@ -3348,6 +3524,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "位置"
+          }
+        }
+      }
+    },
+    "変更はアプリの再起動後に反映されます。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes take effect after restarting the app."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改将在重新启动 App 后生效。"
           }
         }
       }
@@ -4104,6 +4296,22 @@
         }
       }
     },
+    "置き換え…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换…"
+          }
+        }
+      }
+    },
     "置き換える": {
       "localizations": {
         "en": {
@@ -4132,6 +4340,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "自动滚动"
+          }
+        }
+      }
+    },
+    "言語": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Language"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语言"
+          }
+        }
+      }
+    },
+    "設定": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置"
           }
         }
       }
@@ -4356,70 +4596,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开"
-          }
-        }
-      }
-    },
-    "言語": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Language"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "语言"
-          }
-        }
-      }
-    },
-    "システムのデフォルト": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "System Default"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "系统默认"
-          }
-        }
-      }
-    },
-    "変更はアプリの再起動後に反映されます。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes take effect after restarting the app."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "更改将在重新启动 App 后生效。"
-          }
-        }
-      }
-    },
-    "設定": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Settings"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "设置"
           }
         }
       }

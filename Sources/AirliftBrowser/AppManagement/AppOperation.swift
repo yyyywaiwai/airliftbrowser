@@ -31,13 +31,14 @@ final class AppOperation: Identifiable {
     @ObservationIgnored private var lastLogKey: String?
     @ObservationIgnored private var lastLogDate = Date.distantPast
 
+    static let logFolder = URL.applicationSupportDirectory.appending(path: "Airlift Browser/Logs", directoryHint: .isDirectory)
+
     init(title: String, appName: String) {
         self.title = title
         self.appName = appName
         do {
-            let folder = URL.applicationSupportDirectory.appending(path: "Airlift Browser/Logs", directoryHint: .isDirectory)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appending(path: "\(id.uuidString).log")
+            try FileManager.default.createDirectory(at: Self.logFolder, withIntermediateDirectories: true)
+            let url = Self.logFolder.appending(path: "\(id.uuidString).log")
             guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
                 throw AppServiceError(String(localized: "ログファイルを作成できません。"))
             }

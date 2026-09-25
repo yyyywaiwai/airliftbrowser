@@ -497,6 +497,8 @@ private struct ActivityBar: View {
 private struct SettingsView: View {
     let browser: Browser
     @State private var showPoC = false
+    @State private var confirmDeleteLogs = false
+    @State private var hasLogs = false
     @State private var language = (UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")?["AppleLanguages"] as? [String])?.first ?? ""
 
     var body: some View {
@@ -528,6 +530,31 @@ private struct SettingsView: View {
                 }
             }
 
+            Section("保存場所") {
+                LabeledContent {
+                    HStack {
+                        Button("Finderで表示") { reveal(AppOperation.logFolder) }
+                        Button("すべて削除…", role: .destructive) { confirmDeleteLogs = true }
+                            .disabled(!hasLogs)
+                            .confirmationDialog("ログファイルをすべて削除しますか？", isPresented: $confirmDeleteLogs) {
+                                Button("削除", role: .destructive) {
+                                    try? FileManager.default.removeItem(at: AppOperation.logFolder)
+                                    refreshLogs()
+                                }
+                            }
+                    }
+                } label: {
+                    Text("ログファイル")
+                    Text(verbatim: (AppOperation.logFolder.path as NSString).abbreviatingWithTildeInPath)
+                }
+                LabeledContent {
+                    Button("Finderで表示") { reveal(Self.backupFolder) }
+                } label: {
+                    Text("バックアップ")
+                    Text(verbatim: (Self.backupFolder.path as NSString).abbreviatingWithTildeInPath)
+                }
+            }
+
             Section("クレジット") {
                 LabeledContent("airlift") {
                     Link(destination: URL(string: "https://github.com/0xjohnnydev/airlift")!) {
@@ -543,13 +570,25 @@ private struct SettingsView: View {
         }
         .formStyle(.grouped)
         .scrollDisabled(true)
-        .frame(width: 500, height: 400)
+        .frame(width: 500, height: 540)
+        .onAppear(perform: refreshLogs)
         .sheet(isPresented: $showPoC) {
             PoCView(
                 browser: browser,
                 initialTarget: browser.scope == .system ? browser.path : "/var/mobile/Documents"
             )
         }
+    }
+
+    private static let backupFolder = URL.applicationSupportDirectory.appending(path: "Airlift Browser/Backups", directoryHint: .isDirectory)
+
+    private func refreshLogs() {
+        hasLogs = (try? FileManager.default.contentsOfDirectory(atPath: AppOperation.logFolder.path))?.isEmpty == false
+    }
+
+    private func reveal(_ folder: URL) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
     }
 }
 
