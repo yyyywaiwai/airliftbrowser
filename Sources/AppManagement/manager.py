@@ -375,6 +375,8 @@ async def dispatch(request, reporter):
         return storage.list_backups()
     if action == "import":
         return {"backup": storage.import_backup(request["source"], reporter)}
+    if action == "rename":
+        return {"backup": storage.rename(request["backupPath"], request["label"])}
     if action == "export":
         return storage.export_backup(request["backupPath"], request["destination"], request.get("xcappdata", False), reporter)
     if request.get("backupPath") and action in ("list", "get", "mutate"):

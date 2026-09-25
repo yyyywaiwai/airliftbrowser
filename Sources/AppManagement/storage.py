@@ -99,7 +99,7 @@ def load(path, verify=False, reporter=None):
 
 
 def summary(path, manifest):
-    return {"id": manifest["id"], "path": str(path), "name": manifest["app"]["name"],
+    return {"id": manifest["id"], "path": str(path), "name": manifest.get("label") or manifest["app"]["name"],
             "bundleID": manifest["app"]["bundleID"], "created": manifest["created"],
             "totalBytes": manifest["totalBytes"], "status": manifest["status"],
             "version": manifest["app"].get("version", ""),
@@ -126,6 +126,13 @@ def finish(path, manifest):
     return summary(path, manifest)
 
 
+def rename(path, label):
+    manifest = load(path)
+    manifest["label"] = label.strip()
+    atomic_json(Path(path) / MANIFEST, manifest)
+    return summary(path, manifest)
+
+
 def clone(source, reporter):
     manifest = load(source, verify=True, reporter=reporter)
     path, result = create(manifest["app"], manifest["device"], "edited")
@@ -138,6 +145,7 @@ def clone(source, reporter):
             result["regions"].append(dict(item))
         result["issues"] = list(manifest["issues"])
         result["parentID"] = manifest["id"]
+        result["label"] = manifest.get("label", "")
         finish(path, result)
         return path, result
     except BaseException:

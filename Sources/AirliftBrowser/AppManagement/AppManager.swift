@@ -10,6 +10,7 @@ final class AppManager {
     var pending: [PendingAppOperation] = []
     var appID: String?
     var backupID: String?
+    var renamingBackup: AppBackup?
     var regionID: String?
     var files: [AppFile] = []
     var selection: Set<String> = []
@@ -279,6 +280,16 @@ final class AppManager {
         perform(String(localized: "バックアップを書き出し"), showSheet: true, appName: backup.name) {
             _ = try await self.call(AppRequest(action: "export", backupPath: backup.path, destination: url.path, xcappdata: xcappdata))
             self.status = String(localized: "バックアップを書き出しました")
+        }
+    }
+
+    func renameBackup(_ backup: AppBackup, to label: String) {
+        perform(String(localized: "バックアップの名前を変更")) {
+            let result = try await self.call(AppRequest(action: "rename", backupPath: backup.path, label: label))
+            if let saved = result.backup, let index = self.backups.firstIndex(where: { $0.id == saved.id }) {
+                self.backups[index] = saved
+            }
+            self.status = String(localized: "名前を変更しました")
         }
     }
 

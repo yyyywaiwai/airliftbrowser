@@ -12,6 +12,7 @@ struct AppRequest: Encodable, Sendable {
     var sourceIdentity: String?
     var local: String?
     var destination: String?
+    var label: String?
     var source: String?
     var operation: String?
     var overwrite: Bool?

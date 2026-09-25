@@ -6,6 +6,7 @@ struct AppWorkspaceView: View {
     let library: Bool
     @State private var restoreSource: AppBackup?
     @State private var showBackup = false
+    @State private var backupName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -148,5 +149,11 @@ struct AppWorkspaceView: View {
         .alert("操作を完了できませんでした", isPresented: Binding(get: { manager.error != nil }, set: { if !$0 { manager.error = nil } })) {
             Button("OK", role: .cancel) { manager.error = nil }
         } message: { Text(manager.error ?? "") }
+        .alert("バックアップの名前を変更", isPresented: Binding(get: { manager.renamingBackup != nil }, set: { if !$0 { manager.renamingBackup = nil } })) {
+            TextField("名前", text: $backupName)
+            Button("変更") { if let backup = manager.renamingBackup { manager.renameBackup(backup, to: backupName) } }
+            Button("キャンセル", role: .cancel) {}
+        } message: { Text("空欄にするとアプリ名に戻ります。") }
+        .onChange(of: manager.renamingBackup) { backupName = manager.renamingBackup?.name ?? "" }
     }
 }

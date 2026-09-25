@@ -10,12 +10,9 @@ struct AppHistoryView: View {
             ForEach(backups) { backup in
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(backup.dateLabel).font(.headline)
-                        Text("\(backup.deviceName) · \(backup.version) · \(backup.statusLabel)")
+                        Text(backup.name).font(.headline)
+                        Text("\(backup.dateLabel) · \(backup.deviceName) · \(backup.version) · \(backup.statusLabel)")
                             .foregroundStyle(.secondary).font(.caption)
-                        if !backup.issues.isEmpty {
-                            Text(backup.issues.joined(separator: "\n")).font(.caption).foregroundStyle(.orange)
-                        }
                     }
                     Spacer()
                     Text(ByteCountFormatter.string(fromByteCount: backup.totalBytes, countStyle: .file))

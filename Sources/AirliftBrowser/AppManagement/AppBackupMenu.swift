@@ -6,6 +6,7 @@ struct AppBackupMenu: View {
     @Binding var restoreSource: AppBackup?
 
     var body: some View {
+        Button("名前を変更…", systemImage: "pencil") { manager.renamingBackup = backup }
         Button("Finderに表示", systemImage: "folder") { manager.revealBackup(backup) }
         Button("復元…", systemImage: "arrow.uturn.backward") { restoreSource = backup }
             .disabled(manager.deviceID == nil || !backup.canRestore)
