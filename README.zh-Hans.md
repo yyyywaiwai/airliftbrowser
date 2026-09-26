@@ -173,6 +173,10 @@ Airlift Browser 专注于一次处理一个应用的数据。
 
 构建内部实现、测试和真机验证记录见 [DEVELOPMENT.md](DEVELOPMENT.md)（日语）。
 
+## 许可证
+
+本仓库采用 [MIT License](LICENSE)。
+
 ## 致谢
 
 - [airlift](https://github.com/0xjohnnydev/airlift) — Johnny Franks（[@0xjohnnydev](https://github.com/0xjohnnydev)），MIT。

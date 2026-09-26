@@ -173,6 +173,10 @@ Some files, such as browser caches, may be blocked from reading by the device. S
 
 Build internals, tests, and physical-device validation notes are in [DEVELOPMENT.md](DEVELOPMENT.md) (Japanese).
 
+## License
+
+This repository is released under the [MIT License](LICENSE).
+
 ## Credits
 
 - [airlift](https://github.com/0xjohnnydev/airlift) — Johnny Franks ([@0xjohnnydev](https://github.com/0xjohnnydev)), MIT.
