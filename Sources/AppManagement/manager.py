@@ -279,10 +279,13 @@ async def restore(request, reporter):
     reporter.plan(operation_steps([target for _, target in plan]))
     reporter.begin("prepare")
     reporter.end()
+    mismatched = []
     if verify:
         reporter.begin("validate", manifest["totalBytes"])
-        storage.load(request["backupPath"], verify=True, reporter=reporter)
+        mismatched = storage.mismatches(request["backupPath"], manifest, reporter)
         reporter.end()
+        if mismatched and not request.get("acceptMismatch"):
+            return {"confirm": "mismatch", "warnings": mismatched}
     else:
         reporter.skip("validate")
     await transport.quiesce(request["device"], app, reporter)
@@ -314,7 +317,7 @@ async def restore(request, reporter):
                     # Re-read the result in bounded chunks and compare file sets/content.
                     if verify:
                         reporter.begin(prefix + "verify", transfer_bytes)
-                        expected_hashes = {entry["path"]: entry["sha256"] for entry in source["entries"] if entry["kind"] == "file"}
+                        expected_hashes = None if mismatched else {entry["path"]: entry["sha256"] for entry in source["entries"] if entry["kind"] == "file"}
                         await verify_restore(lease, local, "", request.get("mode", "replace"), expected_hashes)
                         reporter.end()
                     else:
@@ -328,7 +331,10 @@ async def restore(request, reporter):
                                    + (", ".join(completed) or "none") + ". " + str(error)) from error
     reporter.begin("finish")
     reporter.end()
-    return {"message": ("Restore and verification complete: " if verify else "Restore complete (not verified): ") + ", ".join(completed)}
+    result = {"message": ("Restore and verification complete: " if verify else "Restore complete (not verified): ") + ", ".join(completed)}
+    if mismatched:
+        result["warnings"] = mismatched
+    return result
 
 
 async def restore_children(lease, local, prefix, mode, defer_verification=False):

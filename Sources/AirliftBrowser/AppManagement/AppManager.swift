@@ -24,6 +24,8 @@ final class AppManager {
     var fraction: Double?
     var error: String?
     var warnings: [String] = []
+    var restoreMismatch: String?
+    private var mismatchRestore: (backup: AppBackup, target: ManagedApp, mode: String, mappings: [String: String])?
     var fileListingError: String?
     var operation: AppOperation?
     var showOperation = false
@@ -313,14 +315,39 @@ final class AppManager {
         }
     }
 
-    func restore(_ backup: AppBackup, target: ManagedApp, mode: String, mappings: [String: String]) {
+    func restore(_ backup: AppBackup, target: ManagedApp, mode: String, mappings: [String: String], acceptMismatch: Bool = false) {
         guard let deviceID else { return }
         perform(String(localized: "「\(target.name)」に復元"), showSheet: true, appName: target.name) {
-            _ = try await self.call(AppRequest(action: "restore", device: deviceID, appID: target.id,
-                                               backupPath: backup.path, mode: mode, mappings: mappings))
+            var request = AppRequest(action: "restore", device: deviceID, appID: target.id,
+                                     backupPath: backup.path, mode: mode, mappings: mappings)
+            request.acceptMismatch = acceptMismatch ? true : nil
+            let result = try await self.call(request)
+            if result.confirm == "mismatch" {
+                self.mismatchRestore = (backup, target, mode, mappings)
+                self.restoreMismatch = result.warnings?.joined(separator: "、") ?? ""
+                self.status = String(localized: "バックアップの内容が記録と一致しません")
+                return
+            }
+            self.mismatchRestore = nil
             if !self.libraryMode, self.appID == target.id { try await self.loadFiles() }
-            self.status = String(localized: "復元が完了しました")
+            if let warnings = result.warnings, !warnings.isEmpty {
+                self.warnings = warnings.map { String(localized: "「\($0)」は記録と違う内容で復元しました") }
+                self.status = self.warnings.joined(separator: "\n")
+            } else {
+                self.status = String(localized: "復元が完了しました")
+            }
         }
+    }
+
+    func confirmMismatchRestore() {
+        guard let pending = mismatchRestore else { return }
+        restoreMismatch = nil
+        restore(pending.backup, target: pending.target, mode: pending.mode, mappings: pending.mappings, acceptMismatch: true)
+    }
+
+    func cancelMismatchRestore() {
+        restoreMismatch = nil
+        mismatchRestore = nil
     }
 
     func loadRestoreApps() {
@@ -353,6 +380,39 @@ final class AppManager {
         }
     }
 
+    func exportFiles(_ files: [AppFile]) {
+        guard !files.isEmpty else { return }
+        if files.count == 1 {
+            exportFile(files[0])
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.prompt = String(localized: "保存先を選択")
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        perform(String(localized: "Macに保存")) {
+            var failures: [String] = []
+            for file in files {
+                do {
+                    let url = directory.appendingPathComponent(file.name)
+                    guard !FileManager.default.fileExists(atPath: url.path),
+                          (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else {
+                        throw AppServiceError(String(localized: "保存先に同じ名前の項目があります。"))
+                    }
+                    var request = self.context("get", relative: file.id)
+                    request.file = file
+                    request.local = url.path
+                    _ = try await self.call(request)
+                } catch {
+                    failures.append("\(file.name): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty { throw AppServiceError(failures.joined(separator: "\n")) }
+        }
+    }
+
     func upload(overwrite: Bool) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -367,6 +427,22 @@ final class AppManager {
         }
     }
 
+    func replaceFile(_ file: AppFile) {
+        guard file.kind == "file", canReceiveFiles, files.contains(file) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = String(localized: "「\(file.name)」を置き換え")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        perform(String(localized: "ファイルを置き換え")) {
+            var request = self.context("mutate", relative: file.id)
+            request.operation = "upload"
+            request.local = url.path
+            request.overwrite = true
+            try await self.applyMutation(request)
+        }
+    }
+
     func mutate(operation: String, file: AppFile? = nil, name: String? = nil) {
         if let name, name.isEmpty || name == "." || name == ".." || name.contains("/") || name.contains("\0") {
             error = String(localized: "この名前は使えません。")
@@ -377,6 +453,23 @@ final class AppManager {
             request.operation = operation
             if let name { request.destination = self.join(name) }
             try await self.applyMutation(request)
+        }
+    }
+
+    func deleteFiles(_ files: [AppFile]) {
+        guard canEdit, !files.isEmpty else { return }
+        perform(String(localized: "ファイルを削除")) {
+            var failures: [String] = []
+            for file in files {
+                do {
+                    var request = self.context("mutate", relative: file.id)
+                    request.operation = "delete"
+                    try await self.applyMutation(request)
+                } catch {
+                    failures.append("\(file.name): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty { throw AppServiceError(failures.joined(separator: "\n")) }
         }
     }
 

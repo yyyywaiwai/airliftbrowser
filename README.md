@@ -1,4 +1,9 @@
-# Airlift Browser
+<h1 align="center">
+  <img src="docs/images/app-icon.png" alt="" width="128"><br>
+  Airlift Browser
+</h1>
+
+日本語 | [English](README.en.md) | [简体中文](README.zh-Hans.md)
 
 iPhone / iPad を USB でつなぎ、端末の中身を Mac の画面で見たり、アプリのデータを丸ごと Mac に保存したりできる macOS アプリです。保存したデータは、あとから端末に戻せます。
 

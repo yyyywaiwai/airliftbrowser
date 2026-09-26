@@ -19,6 +19,7 @@ struct AppResponse: Decodable, Sendable {
     var tree: [AppFile]?
     var sourceIdentity: String?
     var warnings: [String]?
+    var confirm: String?
     var pending: [PendingAppOperation]?
     var local: String?
     var appID: String?

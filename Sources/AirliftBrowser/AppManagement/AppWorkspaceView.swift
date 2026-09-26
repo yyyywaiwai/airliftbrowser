@@ -146,6 +146,12 @@ struct AppWorkspaceView: View {
                 AppBackupView(manager: manager)
             }
         }
+        .alert("バックアップの内容が記録と一致しません", isPresented: Binding(get: { manager.restoreMismatch != nil }, set: { if !$0 { manager.restoreMismatch = nil } })) {
+            Button("このまま復元") { manager.confirmMismatchRestore() }
+            Button("キャンセル", role: .cancel) { manager.cancelMismatchRestore() }
+        } message: {
+            Text("「\(manager.restoreMismatch ?? "")」は記録と違います。改ざんされている可能性があります。この内容のまま復元しますか？")
+        }
         .alert("操作を完了できませんでした", isPresented: Binding(get: { manager.error != nil }, set: { if !$0 { manager.error = nil } })) {
             Button("OK", role: .cancel) { manager.error = nil }
         } message: { Text(manager.error ?? "") }

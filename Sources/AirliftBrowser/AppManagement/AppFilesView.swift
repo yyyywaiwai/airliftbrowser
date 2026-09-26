@@ -5,7 +5,7 @@ struct AppFilesView: View {
     @State private var showName = false
     @State private var newName = ""
     @State private var renameFile: AppFile?
-    @State private var deleteFile: AppFile?
+    @State private var deletingFiles: [AppFile] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,15 +41,26 @@ struct AppFilesView: View {
                     }.width(135)
                 }
                 .contextMenu(forSelectionType: String.self) { ids in
-                    if ids.count == 1, let id = ids.first, let file = manager.files.first(where: { $0.id == id }) {
+                    let chosen = manager.visibleFiles.filter { ids.contains($0.id) }
+                    if chosen.count == 1, let file = chosen.first {
                         if file.isDirectory {
                             Button("フォルダを開く") { manager.navigate(file.id) }
                         }
-                        Button("Macに保存…") { manager.exportFile(file) }
+                    }
+                    if !chosen.isEmpty {
+                        Button("Macに保存…") { manager.exportFiles(chosen) }
                         Divider()
+                    }
+                    if chosen.count == 1, let file = chosen.first {
+                        if file.kind == "file" {
+                            Button("置き換え…") { manager.replaceFile(file) }
+                                .disabled(!manager.canEdit)
+                        }
                         Button("名前を変更…") { renameFile = file; newName = file.name; showName = true }
                             .disabled(!manager.canEdit)
-                        Button("削除…", role: .destructive) { deleteFile = file }
+                    }
+                    if !chosen.isEmpty {
+                        Button("削除…", role: .destructive) { deletingFiles = chosen }
                             .disabled(!manager.canEdit)
                     }
                 } primaryAction: { ids in
@@ -81,8 +92,8 @@ struct AppFilesView: View {
                     Button("同じ名前の項目を上書きして追加…") { manager.upload(overwrite: true) }
                 }.disabled(!manager.canEdit)
                 Button("Macに保存", systemImage: "square.and.arrow.down") {
-                    if let file = manager.selectedFile { manager.exportFile(file) }
-                }.disabled(manager.selectedFile == nil)
+                    manager.exportFiles(manager.visibleFiles.filter { manager.selection.contains($0.id) })
+                }.disabled(manager.visibleFiles.allSatisfy { !manager.selection.contains($0.id) })
                 Spacer()
                 Text("\(manager.visibleFiles.count) 項目").font(.caption).foregroundStyle(.secondary)
             }.controlSize(.small).padding(12)
@@ -102,11 +113,13 @@ struct AppFilesView: View {
                 }
             }.padding(24).frame(width: 360)
         }
-        .confirmationDialog("「\(deleteFile?.name ?? "")」を削除しますか？", isPresented: Binding(
-            get: { deleteFile != nil }, set: { if !$0 { deleteFile = nil } }), titleVisibility: .visible) {
+        .confirmationDialog(deletingFiles.count == 1
+                            ? "「\(deletingFiles[0].name)」を削除しますか？"
+                            : "\(deletingFiles.count) 項目を削除しますか？", isPresented: Binding(
+            get: { !deletingFiles.isEmpty }, set: { if !$0 { deletingFiles = [] } }), titleVisibility: .visible) {
                 Button("削除", role: .destructive) {
-                    if let file = deleteFile { manager.mutate(operation: "delete", file: file) }
-                    deleteFile = nil
+                    manager.deleteFiles(deletingFiles)
+                    deletingFiles = []
                 }
             }
     }

@@ -93,9 +93,19 @@ def load(path, verify=False, reporter=None):
                 raise ValueError("The backup contains duplicate or invalid paths.")
             names.add(key)
             child(root, key, allow_leaf_link=True)
-        if verify and signature(inventory(root, reporter)) != signature(item["entries"]):
-            raise ValueError("The backup doesn't match its record: " + item["name"])
+    if verify and (bad := mismatches(path, manifest, reporter)):
+        raise ValueError("The backup doesn't match its record: " + bad[0])
     return manifest
+
+
+def mismatches(path, manifest, reporter=None):
+    path = Path(path)
+    names = []
+    for item in manifest["regions"]:
+        root = child(path, item["folder"])
+        if signature(inventory(root, reporter)) != signature(item["entries"]):
+            names.append(item["name"])
+    return names
 
 
 def summary(path, manifest):

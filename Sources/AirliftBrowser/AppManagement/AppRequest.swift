@@ -21,6 +21,7 @@ struct AppRequest: Encodable, Sendable {
     var mappings: [String: String]?
     var cancelPath: String?
     var verify: Bool?
+    var acceptMismatch: Bool?
     var regionKinds: [String]?
     var icons: [String: String]?
 }

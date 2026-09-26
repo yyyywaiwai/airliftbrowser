@@ -799,6 +799,17 @@ class Acceptance(unittest.TestCase):
                     if step["total"] is not None:
                         self.assertEqual(step["completed"], step["total"])
 
+                (live / "document").write_bytes(b"device copy")
+                (Path(path) / "Payload/Data/document").write_bytes(b"tampered payload")
+                with patch.object(afc, "get_device_info", AsyncMock(return_value={"FSFreeBytes": 1024**3}), create=True):
+                    held = await manager.restore(request, QuietReporter())
+                    self.assertEqual(held["confirm"], "mismatch")
+                    self.assertEqual((live / "document").read_bytes(), b"device copy")
+                    accepted = await manager.restore({**request, "acceptMismatch": True}, QuietReporter())
+                self.assertEqual((live / "document").read_bytes(), b"tampered payload")
+                self.assertEqual(accepted["warnings"], ["データ"])
+                (live / "document").write_bytes(b"backup payload")
+
                 # Known protected trees are pruned without even stat/list/open,
                 # while similarly named directories remain part of the backup.
                 blocked = live / "Library/Caches/WebKit/NetworkCache/Version 17/Blobs/protected"
