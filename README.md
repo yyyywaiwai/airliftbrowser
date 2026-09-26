@@ -173,6 +173,10 @@ make open   # ビルドして起動
 
 ビルドの内部、テスト手順、実機検証の記録は [DEVELOPMENT.md](DEVELOPMENT.md) にまとめています。
 
+## ライセンス
+
+このリポジトリは [MIT License](LICENSE) です。
+
 ## クレジット
 
 - [airlift](https://github.com/0xjohnnydev/airlift) — Johnny Franks（[@0xjohnnydev](https://github.com/0xjohnnydev)）、MIT
