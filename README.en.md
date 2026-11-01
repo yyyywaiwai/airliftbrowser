@@ -5,7 +5,7 @@
 
 [日本語](README.md) | English | [简体中文](README.zh-Hans.md)
 
-Airlift Browser is a macOS app for exploring an iPhone or iPad over USB, saving an individual app's data to your Mac, and restoring it later.
+Airlift Browser is a macOS app for exploring an iPhone or iPad over USB or Wi-Fi, saving an individual app's data to your Mac, and restoring it later.
 
 A Finder backup saves the entire device; it does not let you extract or restore just one app. Airlift Browser handles apps individually. On a physical device, a 2.5 GB app backup covering all its regions was restored and verified against the original data.
 
@@ -23,7 +23,7 @@ $(brew --prefix)/bin/python3 -m pip install pymobiledevice3
 ```
 
 > [!IMPORTANT]
-> Install `pymobiledevice3` into Homebrew's Python. The app only looks for `/opt/homebrew/bin/python3` and `/usr/local/bin/python3`; it will not find packages installed into pyenv, conda, or a virtual environment.
+> Install `pymobiledevice3` into Homebrew's Python. The app checks the default `python3` and versioned Homebrew installations (such as `python@3.14`), selecting an interpreter that can import the package. It does not automatically search pyenv, conda, or virtual environments.
 
 Building also requires the full Xcode app; Command Line Tools alone are not enough.
 
@@ -45,6 +45,8 @@ To edit the source, open `Package.swift` in Xcode.
 ### 3. Connect and trust your device
 
 Connect your device with a cable, unlock it, and tap **Trust This Computer** on the device. It is ready when it appears under Devices in the sidebar. If it does not appear, click **Search for Devices** at the bottom of the sidebar.
+
+To use Wi-Fi, select the device in Finder during the initial USB connection, enable **Show this device when on Wi-Fi** under General, and click **Apply**. Then join the same network on your Mac and device, unplug the cable, and click **Search for Devices**. Discovery takes about 10 seconds; the sidebar shows USB or Wi-Fi for each device.
 
 > [!IMPORTANT]
 > Enable Developer Mode in the device's Settings. Without it, the app cannot find residual data from removed apps or automatically stop the target app before a backup or restore.

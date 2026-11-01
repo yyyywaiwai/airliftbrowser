@@ -26,6 +26,75 @@ import common
 import manager
 import storage
 import transport
+import container_files
+
+
+class PythonSelectionTests(unittest.TestCase):
+    def test_current_interpreter_with_dependency_is_kept(self):
+        with patch.dict(sys.modules, {"pymobiledevice3": MagicMock(), "pymobiledevice3.lockdown": MagicMock()}), \
+                patch.object(container_files.subprocess, "run") as probe, \
+                patch.object(container_files.os, "execv") as restart:
+            manager.ensure_python()
+        probe.assert_not_called()
+        restart.assert_not_called()
+
+    def test_symlink_to_current_interpreter_is_not_restarted(self):
+        with tempfile.TemporaryDirectory() as root:
+            executable = Path(root) / "python3.15"
+            executable.touch()
+            alias = Path(root) / "python3.14"
+            alias.symlink_to(executable)
+            with patch.dict(sys.modules, {"pymobiledevice3.lockdown": None}), \
+                    patch.object(sys, "executable", str(executable)), \
+                    patch.object(container_files.Path, "glob", return_value=[alias]), \
+                    patch.object(container_files.os, "access", side_effect=lambda path, mode: path == str(alias)), \
+                    patch.object(container_files.subprocess, "run") as probe, \
+                    patch.object(container_files.os, "execv") as restart:
+                with self.assertRaisesRegex(RuntimeError, "pymobiledevice3 is required"):
+                    manager.ensure_python()
+            probe.assert_not_called()
+            restart.assert_not_called()
+
+    def test_versioned_homebrew_python_is_probed_before_restart(self):
+        versioned = Path("/opt/homebrew/opt/python@3.14/bin/python3.14")
+        with patch.dict(sys.modules, {"pymobiledevice3.lockdown": None}), \
+                patch.object(sys, "executable", "/test/python-current"), \
+                patch.object(container_files.Path, "glob", return_value=[versioned]), \
+                patch.object(container_files.os, "access", return_value=True), \
+                patch.object(container_files.subprocess, "run") as probe, \
+                patch.object(container_files.os, "execv", side_effect=SystemExit) as restart:
+            probe.side_effect = [MagicMock(returncode=1), MagicMock(returncode=1), MagicMock(returncode=0)]
+            with self.assertRaises(SystemExit):
+                manager.ensure_python()
+        self.assertEqual(probe.call_args.args[0], [str(versioned), "-B", "-c", "import pymobiledevice3.lockdown"])
+        self.assertEqual(probe.call_args.kwargs["timeout"], 5)
+        restart.assert_called_once_with(str(versioned), [str(versioned), "-B", *sys.argv])
+
+    def test_missing_or_hung_dependencies_finish_without_restart(self):
+        with patch.dict(sys.modules, {"pymobiledevice3.lockdown": None}), \
+                patch.object(sys, "executable", "/test/python-current"), \
+                patch.object(container_files.Path, "glob", return_value=[]), \
+                patch.object(container_files.os, "access", return_value=True), \
+                patch.object(container_files.subprocess, "run") as probe, \
+                patch.object(container_files.os, "execv") as restart:
+            probe.side_effect = [container_files.subprocess.TimeoutExpired("python", 5), OSError("missing")]
+            with self.assertRaisesRegex(RuntimeError, "pymobiledevice3 is required"):
+                manager.ensure_python()
+        self.assertEqual(probe.call_count, 2)
+        restart.assert_not_called()
+
+    def test_each_real_interpreter_is_probed_only_once(self):
+        versioned = Path("/opt/homebrew/opt/python@3.14/bin/python3.14")
+        with patch.dict(sys.modules, {"pymobiledevice3.lockdown": None}), \
+                patch.object(sys, "executable", "/test/python-current"), \
+                patch.object(container_files.Path, "glob", return_value=[versioned, versioned]), \
+                patch.object(container_files.os, "access", return_value=True), \
+                patch.object(container_files.subprocess, "run", return_value=MagicMock(returncode=1)) as probe, \
+                patch.object(container_files.os, "execv") as restart:
+            with self.assertRaises(RuntimeError):
+                manager.ensure_python()
+        self.assertEqual(probe.call_count, 3)
+        restart.assert_not_called()
 
 
 class AppIconTests(unittest.TestCase):

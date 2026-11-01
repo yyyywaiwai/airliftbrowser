@@ -15,18 +15,28 @@ static NSDictionary *Failure(NSString *message) {
 
 static void Discover(AMDeviceNotificationCallbackInfo *info, void *context) {
     (void)context;
-    if (!info || info->message != 1 || AMDeviceGetInterfaceType(info->device) != 1) return;
+    if (!info || !info->device || info->message != 1) return;
     AMDeviceRef device = info->device;
+    int interface = AMDeviceGetInterfaceType(device);
+    if (interface != 1 && interface != 2) return;
     if (AMDeviceConnect(device) != 0) return;
+    if (!AMDeviceIsPaired(device) || AMDeviceValidatePairing(device) != 0 ||
+        AMDeviceStartSession(device) != 0) {
+        AMDeviceDisconnect(device);
+        return;
+    }
     NSString *udid = CFBridgingRelease(AMDeviceCopyDeviceIdentifier(device));
     NSString *name = CFBridgingRelease(AMDeviceCopyValue(device, NULL, CFSTR("DeviceName")));
     NSString *product = CFBridgingRelease(AMDeviceCopyValue(device, NULL, CFSTR("ProductType")));
     NSString *version = CFBridgingRelease(AMDeviceCopyValue(device, NULL, CFSTR("ProductVersion")));
-    if (udid && AMDeviceIsPaired(device) &&
+    if (udid &&
         ([product hasPrefix:@"iPad"] || [product hasPrefix:@"iPhone"])) {
-        Devices[udid] = @{ @"id": udid, @"name": name ?: product,
-                          @"product": product, @"version": version ?: @"", @"transport": @"USB" };
+        if (interface == 1 || ![Devices[udid][@"transport"] isEqual:@"USB"])
+            Devices[udid] = @{ @"id": udid, @"name": name ?: product,
+                              @"product": product, @"version": version ?: @"",
+                              @"transport": interface == 1 ? @"USB" : @"Wi-Fi" };
     }
+    AMDeviceStopSession(device);
     AMDeviceDisconnect(device);
 }
 
@@ -35,12 +45,14 @@ static NSDictionary *DiscoverDevices(void) {
     AMDeviceNotificationRef subscription = NULL;
     NSDictionary *options = @{
         @"NotificationOptionSearchForPairedDevices": @YES,
-        @"NotificationOptionSearchForPairedDevicesViaDirectConnectionsOnly": @YES,
-        @"NotificationOptionEnableUSBMux": @YES
+        @"NotificationOptionSearchForPairedDevicesViaDirectConnectionsOnly": @NO,
+        @"NotificationOptionSearchForWiFiPairableDevices": @NO,
+        @"NotificationOptionEnableUSBMux": @YES,
+        @"NotificationOptionEnableRemoteXPC": @YES
     };
     int status = AMDeviceNotificationSubscribeWithOptions(Discover, 0, 0, NULL,
         &subscription, (__bridge CFDictionaryRef)options);
-    if (!status) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
+    if (!status) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10.0, false);
     if (subscription) AMDeviceNotificationUnsubscribe(subscription);
     return status ? Failure(@"Couldn't find a connected device.")
                   : @{ @"ok": @YES, @"devices": Devices.allValues };
@@ -494,8 +506,8 @@ int main(int argc, const char *argv[]) {
         DeviceSession session;
         OpenSession(&session);
         NSDictionary *result;
-        if (!session.afc || session.afcStatus || AMDeviceGetInterfaceType(session.device) != 1) {
-            result = Failure(@"Make sure your device is connected with a cable, unlocked, and set to 'Trust This Computer', then try again.");
+        if (!session.afc || session.afcStatus) {
+            result = Failure(@"Make sure your device is unlocked and trusts this Mac. Connect with USB, or enable Wi-Fi syncing in Finder and use the same network, then try again.");
         } else if (strcmp(argv[1], "finish-write") == 0 && argc == 10) {
             result = FinishWrite(session.afc, @[
                 @(argv[3]), @(argv[4]), @(argv[5]), @(argv[6]),

@@ -16,17 +16,8 @@ sys.dont_write_bytecode = True
 
 from common import HOME, MANAGED_NAMES, Reporter, atomic_json, child, download_destination, read_json, relative, sha256
 import catalog
+from container_files import ensure_python
 import storage
-
-
-def ensure_python():
-    try:
-        import pymobiledevice3  # noqa: F401
-    except ImportError:
-        for candidate in ("/opt/homebrew/bin/python3", "/usr/local/bin/python3"):
-            if candidate != sys.executable and os.access(candidate, os.X_OK):
-                os.execv(candidate, [candidate, "-B", *sys.argv])
-        raise RuntimeError("Python 3 with pymobiledevice3 is required.")
 
 
 def local_region(request):

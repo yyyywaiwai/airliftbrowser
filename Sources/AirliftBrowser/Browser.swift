@@ -302,7 +302,7 @@ private func bridge(_ arguments: [String]) async throws -> Reply {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
-            throw BridgeError(message: String(localized: "デバイスとの通信が途切れました（コード \(process.terminationStatus)）。ケーブルの接続とロック解除を確認してください。"))
+            throw BridgeError(message: String(localized: "デバイスとの通信が途切れました（コード \(process.terminationStatus)）。USBまたはWi-Fiの接続とロック解除を確認してください。"))
         }
         guard process.terminationStatus == 0, reply.ok else {
             throw BridgeError(message: reply.error ?? String(localized: "デバイスでの操作に失敗しました。"))
@@ -548,11 +548,7 @@ private func listDVTFiles(_ deviceID: String, path: String) async throws -> [Ent
         let process = Process()
         let script = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Resources/DeviceFiles/dvt_files.py")
-        let candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
-        guard let python = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
-            throw BridgeError(message: String(localized: "pymobiledevice3 が入った Python が見つかりません。"))
-        }
-        process.executableURL = URL(fileURLWithPath: python)
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.environment = ProcessInfo.processInfo.environment.merging(
             ["PYTHONDONTWRITEBYTECODE": "1"]) { _, new in new }
         process.arguments = [script.path, "--device", deviceID, "--path", path]

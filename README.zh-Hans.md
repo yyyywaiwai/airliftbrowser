@@ -5,7 +5,7 @@
 
 [日本語](README.md) | [English](README.en.md) | 简体中文
 
-Airlift Browser 是一款 macOS 应用。通过 USB 连接 iPhone 或 iPad 后，可以在 Mac 上浏览设备内容、单独保存某个应用的数据，并在以后将数据恢复到设备。
+Airlift Browser 是一款 macOS 应用。通过 USB 或 Wi-Fi 连接 iPhone 或 iPad 后，可以在 Mac 上浏览设备内容、单独保存某个应用的数据，并在以后将数据恢复到设备。
 
 Finder 的标准备份会保存整台设备，无法只提取或恢复一个应用。Airlift Browser 按应用分别处理。在真机上，已验证完整保存一个约 2.5 GB 应用的全部区域，并在恢复后确认内容与备份前一致。
 
@@ -23,7 +23,7 @@ $(brew --prefix)/bin/python3 -m pip install pymobiledevice3
 ```
 
 > [!IMPORTANT]
-> 请将 `pymobiledevice3` 安装到 Homebrew 的 Python 中。应用只查找 `/opt/homebrew/bin/python3` 和 `/usr/local/bin/python3`，不会找到安装在 pyenv、conda 或虚拟环境中的软件包。
+> 请将 `pymobiledevice3` 安装到 Homebrew 的 Python 中。应用会检查默认的 `python3` 和 Homebrew 的版本化 Python（如 `python@3.14`），并选择能够导入软件包的解释器。不会自动搜索 pyenv、conda 或虚拟环境。
 
 构建还需要完整的 Xcode 应用；仅安装 Command Line Tools 不够。
 
@@ -45,6 +45,8 @@ make open   # 构建并启动
 ### 3. 连接并信任设备
 
 用数据线连接设备，解锁设备，并在设备上选择“信任此电脑”。设备出现在侧边栏的“设备”下，即表示准备就绪。如果未出现，请点击侧边栏底部的“搜索设备”。
+
+使用 Wi-Fi 时，请在首次 USB 连接期间于 Finder 中选择设备，在“通用”中启用“接入 Wi-Fi 时显示此设备”，然后点击“应用”。之后让 Mac 和设备连接同一网络，拔下数据线并点击“搜索设备”。搜索约需 10 秒，侧边栏会显示 USB 或 Wi-Fi 连接类型。
 
 > [!IMPORTANT]
 > 请在设备的“设置”中启用开发者模式。否则，应用无法发现已删除应用留下的数据，也无法在备份或恢复前自动停止目标应用。

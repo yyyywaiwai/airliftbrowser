@@ -1416,18 +1416,18 @@
         }
       }
     },
-    "ケーブルでつないでロックを解除し、「このコンピュータを信頼」を選んでから再検索してください。": {
+    "初回はUSBでつなぎ、ロックを解除して「このコンピュータを信頼」を選んでください。Wi-Fi接続はFinderで「Wi-Fiがオンのときにこのデバイスを表示」を有効にし、同じネットワークで再検索してください。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connect with a cable, unlock the device, tap “Trust This Computer”, then search again."
+            "value": "First connect via USB, unlock the device, and tap “Trust This Computer”. For Wi-Fi, enable “Show this device when on Wi-Fi” in Finder, join the same network, then search again."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "用数据线连接并解锁设备，选择“信任此电脑”后再重新搜索。"
+            "value": "首次请通过 USB 连接并解锁设备，选择“信任此电脑”。使用 Wi-Fi 时，请在 Finder 中启用“接入 Wi-Fi 时显示此设备”，连接同一网络后重新搜索。"
           }
         }
       }
@@ -1720,18 +1720,18 @@
         }
       }
     },
-    "デバイスとの通信が途切れました（コード %d）。ケーブルの接続とロック解除を確認してください。": {
+    "デバイスとの通信が途切れました（コード %d）。USBまたはWi-Fiの接続とロック解除を確認してください。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lost connection to the device (code %d). Check the cable and make sure the device is unlocked."
+            "value": "Lost connection to the device (code %d). Check the USB or Wi-Fi connection and make sure the device is unlocked."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "与设备的连接中断（代码 %d）。请检查数据线连接并确认设备已解锁。"
+            "value": "与设备的连接中断（代码 %d）。请检查 USB 或 Wi-Fi 连接并确认设备已解锁。"
           }
         }
       }

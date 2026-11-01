@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
 import posixpath
 import subprocess
 import sys
@@ -25,13 +26,30 @@ def run(*arguments):
 
 def ensure_python():
     try:
-        import pymobiledevice3  # noqa: F401
+        import pymobiledevice3.lockdown  # noqa: F401
         return
     except ImportError:
         pass
-    for candidate in ("/opt/homebrew/bin/python3", "/usr/local/bin/python3"):
-        if candidate != sys.executable and os.access(candidate, os.X_OK):
-            os.execv(candidate, [candidate, *sys.argv])
+    candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+    for prefix in ("/opt/homebrew", "/usr/local"):
+        candidates.extend(str(path) for path in sorted(
+            Path(prefix).glob("opt/python@3.*/bin/python3.*"), reverse=True)
+            if path.name.removeprefix("python3.").isdigit())
+    # Homebrew's python3 symlink and sys.executable can name the same interpreter.
+    seen = {os.path.realpath(sys.executable)}
+    for candidate in candidates:
+        resolved = os.path.realpath(candidate)
+        if resolved in seen or not os.access(candidate, os.X_OK):
+            continue
+        seen.add(resolved)
+        try:
+            probe = subprocess.run([candidate, "-B", "-c", "import pymobiledevice3.lockdown"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            if probe.returncode == 0:
+                os.execv(candidate, [candidate, "-B", *sys.argv])
+        except (OSError, subprocess.SubprocessError):
+            continue
+    raise RuntimeError("Python 3 with pymobiledevice3 is required. Install it into a Homebrew Python.")
 
 
 def devicectl_apps(device):
@@ -276,8 +294,8 @@ def main():
     parser.add_argument("--device", required=True)
     parser.add_argument("--path", required=True)
     args = parser.parse_args()
-    ensure_python()
     try:
+        ensure_python()
         result = {"ok": True, "entries": browse(args.device, args.path)}
     except Exception as error:
         result = {"ok": False, "error": str(error)}

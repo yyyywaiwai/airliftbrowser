@@ -7,18 +7,18 @@
 | | 条件 |
 | --- | --- |
 | ビルド | macOS 14 以降、Xcode 15 以降（Command Line Tools ではなく Xcode 本体） |
-| 実行 | iPhone / iPad（USB 接続、ロック解除、「この Mac を信頼」、開発者モード有効） |
+| 実行 | iPhone / iPad（USB または Wi-Fi 接続、ロック解除、「この Mac を信頼」、開発者モード有効） |
 | 実行 | `pymobiledevice3` が入った Python 3 |
-| 通信 | USB のみ。`lockdown.create_using_usbmux` と `AMDeviceGetInterfaceType == 1` を使うため、Wi-Fi 経由の接続は対象外 |
+| 通信 | USB / Wi-Fi。MobileDevice のペアリング済み端末を約 10 秒検索し、USB（interface 1）と Wi-Fi（interface 2）を対象にする。同一 UDID は USB 表示を優先。Wi-Fi は初回の USB 信頼設定と Finder の Wi-Fi 表示設定が必要 |
 
-`pymobiledevice3` は Homebrew の Python にインストールしてください。アプリが探すのは `/opt/homebrew/bin/python3` と `/usr/local/bin/python3` の2つだけです。pyenv、conda、venv、virtualenv の Python は検出されません。
+`pymobiledevice3` は Homebrew の Python にインストールしてください。現在の Python で読み込めない場合は、`/opt/homebrew/bin/python3`、`/usr/local/bin/python3`、両 Homebrew prefix の `opt/python@3.*/bin/python3.*` を調べます。pyenv、conda、venv、virtualenv は自動検索しません。
 
 ```sh
 brew install python
 $(brew --prefix)/bin/python3 -m pip install pymobiledevice3
 ```
 
-Swift 側はまず `/usr/bin/python3` で `Sources/AppManagement/manager.py` を起動し、その `ensure_python()` が上の 2 つのパスを順に調べて、`pymobiledevice3` を import できる Python で自分自身を起動し直します。DVT 一覧（`Browser.swift`）は同じ 2 つのパスを直接探します。
+アプリ管理・コンテナ一覧・DVT 一覧は `/usr/bin/python3` で起動し、`Sources/DeviceFiles/container_files.py` の `ensure_python()` を共用します。候補ごとに `pymobiledevice3.lockdown` の import を別プロセスで確認し（上限 5 秒）、成功した Python でだけ起動し直します。実行ファイルの実パスで重複と現在の Python を除外するため、シンボリックリンクによる再起動ループを防ぎます。候補がなければエラーを返します。
 
 ## ビルド
 
@@ -73,6 +73,7 @@ make strings  # UI 文字列を Localization/Localizable.xcstrings に同期
 
 ```sh
 python3 -B Scripts/test_app_management.py
+make test-discovery
 
 # 旧上限（4 GB）を超える単一ファイルのストリーミング
 AIRLIFT_TEST_BYTES=10737418257 python3 -B Scripts/test_app_management.py \
@@ -110,6 +111,10 @@ python3 Scripts/smoke.py DEVICE_UDID   # 別の USB デバイスを指定する�
 引数を省くと、USB 接続中の iPad Air M2（iPad14,8）を使います。作成した UUID 名のフォルダの中だけで、作成・送信・名前の変更・取得・完全一致の照合・削除を行います。日本語ファイル名、不正なパス、リモート／ローカルの上書き拒否、空でないフォルダの削除拒否もこの 1 本で確かめます。結果は標準出力に出るだけで、ファイルには残りません。
 
 ### 実機検証の記録
+
+**2026-11-02** — iPhone 15 / iOS 27.0.1 を `Wi-Fi`、iPhone 12 mini / iOS 17.0 を `USB` として検出。iPhone 15 は Wi-Fi 経由で Media 直下の 16 項目を取得しました。読み取りのみで、Wi-Fi での書き込み・バックアップ・復元と GUI 表示は未検証です。
+
+**2026-11-02（Python 選択修正後）** — iPhone 15 / iOS 27.0.1（24A446）/ Wi-Fi。既定の Python 3.15 に依存パッケージがない環境で、Python 3.14 を自動選択し、ビルド済みヘルパーが 470 件（インストール済み 384 件、残りデータなど 86 件）を約 5.49 秒で取得しました。GUI でも 470 件の一覧、`AdGuard` と `com.adguard.AdguardExtension` による各 1 件への絞り込み、不一致の検索語で 0 件、検索語を消すと 470 件に戻ることを確認しました。未完了操作は 0 件。App Group の残りデータ列挙には `DvtDirListError` の警告が 1 件残っています。バックアップ・復元・書き込みは実施していません。
 
 **2026-09-21** — iPad Air M2 / iPadOS 27.0 / USB。262,176 バイトの往復一致、生成ファイル・フォルダの削除後の不在まで確認。GUI でも端末検出・一覧・フォルダ作成・ダブルクリックでの移動・親フォルダへの復帰を確認。AirTraffic PoC も `/var/tmp` に対して新規 85 バイト canary の書き込み、Media 経由の完全一致回収、対象 canary と一時データの削除、既存 Books 同期 4 項目の復元を確認。実コンテナ列挙では 314 個の Application コンテナと 28 個の App Group を取得し、`Documents`・`Library`・`tmp` を実表示しました。DVT 列挙では `/var/tmp` の 589 項目を取得し、ディレクトリ 581 件を実機照会で判定しました。Bundle 一覧では Omnara を `com.omnara.app` として表示し、`SerializedPlaceholder.ipa` を 1,130,719 バイト抽出・完全一致照合後に元パスへ復元しました。
 

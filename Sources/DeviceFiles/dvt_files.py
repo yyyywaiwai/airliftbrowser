@@ -8,10 +8,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-from pymobiledevice3.exceptions import DvtDirListError
-from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
-from pymobiledevice3.services.dvt.instruments.device_info import DeviceInfo
-from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+from container_files import ensure_python
 
 
 KNOWN_DIRECTORIES = {
@@ -52,6 +49,11 @@ DIRECTORY_ONLY_PATHS = {
 
 
 async def browse(device, path):
+    from pymobiledevice3.exceptions import DvtDirListError
+    from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
+    from pymobiledevice3.services.dvt.instruments.device_info import DeviceInfo
+    from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+
     async with UserspaceRsdTunnel(serial=device) as rsd:
         async with DvtProvider(rsd) as dvt, DeviceInfo(dvt) as info:
             names = await info.ls(path)
@@ -83,6 +85,7 @@ def main():
     parser.add_argument("--path", required=True)
     args = parser.parse_args()
     try:
+        ensure_python()
         result = {"ok": True, "entries": asyncio.run(
             asyncio.wait_for(browse(args.device, args.path), timeout=60))}
     except Exception as error:

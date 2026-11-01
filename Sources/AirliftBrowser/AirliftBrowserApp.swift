@@ -82,7 +82,7 @@ private struct BrowserView: View {
                         ForEach(browser.devices) { device in
                             VStack(alignment: .leading, spacing: 5) {
                                 Label(device.name, systemImage: device.product.hasPrefix("iPad") ? "ipad" : "iphone")
-                                Text(verbatim: (device.product.hasPrefix("iPad") ? "iPadOS " : "iOS ") + device.version)
+                                Text(verbatim: (device.product.hasPrefix("iPad") ? "iPadOS " : "iOS ") + device.version + " · " + device.transport)
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(.vertical, 5).tag(device.id)
                         }
@@ -162,7 +162,7 @@ private struct BrowserView: View {
                 Divider()
                 if browser.deviceID == nil {
                     ContentUnavailableView("iPhoneまたはiPadを接続してください", systemImage: "cable.connector",
-                        description: Text("ケーブルでつないでロックを解除し、「このコンピュータを信頼」を選んでから再検索してください。"))
+                        description: Text("初回はUSBでつなぎ、ロックを解除して「このコンピュータを信頼」を選んでください。Wi-Fi接続はFinderで「Wi-Fiがオンのときにこのデバイスを表示」を有効にし、同じネットワークで再検索してください。"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if browser.scope == .cards {
                     cardBrowser
