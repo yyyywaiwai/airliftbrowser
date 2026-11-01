@@ -93,7 +93,7 @@ private struct BrowserView: View {
                     locationButton("アプリ", icon: "square.grid.2x2", hint: "アプリのデータを表示したり、Macにバックアップしたりできます。", selected: appSection == "apps") {
                         appSection = "apps"
                     }
-                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したバックアップを開いたり、デバイスに復元したりできます。", selected: appSection == "backups") {
+                    locationButton("バックアップ", icon: "archivebox", hint: "Macに保存したバックアップを開いたり、デバイスに復元したりできます。", selected: appSection == "backups", requiresDevice: false) {
                         appSection = "backups"
                     }
                     locationButton("Media", icon: "externaldrive", hint: "写真や音楽などが入っているMediaフォルダのファイルを表示・操作します。", selected: appSection == "legacy" && browser.scope == .media) {
@@ -457,14 +457,14 @@ private struct BrowserView: View {
             .padding(.vertical, 7)
     }
 
-    private func locationButton(_ title: LocalizedStringKey, icon: String, hint: LocalizedStringKey, selected: Bool,
+    private func locationButton(_ title: LocalizedStringKey, icon: String, hint: LocalizedStringKey, selected: Bool, requiresDevice: Bool = true,
                                 action: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button(action: action) {
                 sidebarRowLabel(title, icon: icon)
             }
             .buttonStyle(LocationRowButtonStyle())
-            .disabled(browser.deviceID == nil || browser.blocksNewWork)
+            .disabled((requiresDevice && browser.deviceID == nil) || browser.blocksNewWork)
             Image(systemName: "info.circle")
                 .foregroundStyle(.secondary)
                 .help(hint)
