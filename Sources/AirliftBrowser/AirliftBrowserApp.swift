@@ -31,7 +31,7 @@ private struct LocationRowButtonStyle: ButtonStyle {
 private struct BrowserView: View {
     @Bindable var browser: Browser
     @State private var appManager = AppManager()
-    @State private var appSection = "apps"
+    @State private var appSection: String?
     @State private var search = ""
     @State private var pathDraft = "/"
     @State private var naming: NameRequest?
@@ -125,7 +125,11 @@ private struct BrowserView: View {
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
             .disabled(browser.blocksNewWork || appManager.busy)
         } detail: {
-            if appSection != "legacy" {
+            if appSection == nil {
+                ContentUnavailableView("場所を選んでください", systemImage: "sidebar.left",
+                    description: Text("サイドバーから表示する場所を選んでください。"))
+                    .navigationTitle("Airlift Browser")
+            } else if appSection != "legacy" {
                 AppWorkspaceView(manager: appManager, deviceID: browser.deviceID, library: appSection == "backups")
                     .disabled(browser.blocksNewWork)
             } else {
